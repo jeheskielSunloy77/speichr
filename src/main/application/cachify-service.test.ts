@@ -9,6 +9,8 @@ import type {
   ConnectionProfile,
   ConnectionSecret,
   ProviderCapabilities,
+  RetentionPolicy,
+  StorageSummary,
 } from '../../shared/contracts/cache'
 
 import { OperationFailure } from '../domain/operation-failure'
@@ -18,6 +20,7 @@ import type {
   ConnectionRepository,
   EngineEventIngestor,
   MemcachedKeyIndexRepository,
+  RetentionRepository,
   SecretStore,
 } from './ports'
 
@@ -1000,5 +1003,299 @@ describe('CachifyService', () => {
     expect(artifact.metadata.redactionProfile).toBe('strict')
 
     fs.rmSync(tempDirectory, { recursive: true, force: true })
+  })
+
+  it('enforces governance windows and resumes aborted workflows from checkpoints', async () => {
+    const repository = new InMemoryConnectionRepository()
+    const secretStore = new InMemorySecretStore()
+    const memcachedIndex = new InMemoryMemcachedIndexRepository()
+    const searchKeysMock = vi.fn(async () => ({
+      keys: ['job:1', 'job:2', 'job:3'],
+      nextCursor: undefined,
+    }))
+    const deleteKeyMock = vi.fn(async (_profile: ConnectionProfile, _secret: ConnectionSecret, key: string) => {
+      if (key === 'job:2') {
+        throw new Error('planned workflow failure')
+      }
+    })
+    const gateway = createGatewayMock({
+      searchKeys: searchKeysMock,
+      deleteKey: deleteKeyMock,
+    })
+
+    const profile: ConnectionProfile = {
+      ...createStoredProfile(),
+      id: 'governance-conn-1',
+      secretRef: 'governance-conn-1',
+      environment: 'dev',
+    }
+
+    await repository.save(profile)
+    await secretStore.saveSecret(profile.id, { password: 'secret' })
+
+    const service = new CachifyService(
+      repository,
+      secretStore,
+      memcachedIndex,
+      gateway,
+    )
+
+    const weekdayByIndex = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
+    const todayWeekday = weekdayByIndex[new Date().getUTCDay()]
+    const blockedWeekday =
+      weekdayByIndex[(new Date().getUTCDay() + 1) % weekdayByIndex.length]
+
+    const policyPack = await service.createGovernancePolicyPack({
+      policyPack: {
+        name: 'Dev Governance',
+        description: 'Only allow controlled windows',
+        environments: ['dev'],
+        maxWorkflowItems: 25,
+        maxRetryAttempts: 1,
+        schedulingEnabled: true,
+        executionWindows: [
+          {
+            id: 'blocked-window',
+            weekdays: [blockedWeekday],
+            startTime: '00:00',
+            endTime: '23:59',
+            timezone: 'UTC',
+          },
+        ],
+        enabled: true,
+      },
+    })
+
+    await service.assignGovernancePolicyPack({
+      connectionId: profile.id,
+      policyPackId: policyPack.id,
+    })
+
+    await expect(
+      service.executeWorkflow({
+        connectionId: profile.id,
+        template: {
+          name: 'Delete jobs',
+          kind: 'deleteByPattern',
+          parameters: {
+            pattern: 'job:*',
+            limit: 25,
+          },
+          requiresApprovalOnProd: true,
+          supportsDryRun: true,
+        },
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: 'UNAUTHORIZED',
+      }),
+    )
+
+    await service.updateGovernancePolicyPack({
+      id: policyPack.id,
+      policyPack: {
+        name: 'Dev Governance',
+        description: 'Only allow controlled windows',
+        environments: ['dev'],
+        maxWorkflowItems: 25,
+        maxRetryAttempts: 1,
+        schedulingEnabled: true,
+        executionWindows: [
+          {
+            id: 'active-window',
+            weekdays: [todayWeekday],
+            startTime: '00:00',
+            endTime: '23:59',
+            timezone: 'UTC',
+          },
+        ],
+        enabled: true,
+      },
+    })
+
+    const execution = await service.executeWorkflow({
+      connectionId: profile.id,
+      template: {
+        name: 'Delete jobs',
+        kind: 'deleteByPattern',
+        parameters: {
+          pattern: 'job:*',
+          limit: 25,
+        },
+        requiresApprovalOnProd: true,
+        supportsDryRun: true,
+      },
+      retryPolicy: {
+        maxAttempts: 5,
+        backoffMs: 0,
+        backoffStrategy: 'fixed',
+        abortOnErrorRate: 0.4,
+      },
+    })
+
+    expect(execution.status).toBe('aborted')
+    expect(execution.policyPackId).toBe(policyPack.id)
+    expect(execution.scheduleWindowId).toBe('active-window')
+    expect(execution.checkpointToken).toBe('2')
+    expect(
+      execution.stepResults.find((step) => step.status === 'error')?.attempts,
+    ).toBe(1)
+
+    const resumed = await service.resumeWorkflow({
+      executionId: execution.id,
+    })
+
+    expect(resumed.status).toBe('success')
+    expect(resumed.resumedFromExecutionId).toBe(execution.id)
+    expect(resumed.stepResults).toHaveLength(1)
+    expect(resumed.stepResults[0].step).toContain('job:3')
+  })
+
+  it('delegates retention policy operations and auto-purges over-budget datasets', async () => {
+    const repository = new InMemoryConnectionRepository()
+    const secretStore = new InMemorySecretStore()
+    const memcachedIndex = new InMemoryMemcachedIndexRepository()
+    const gateway = createGatewayMock()
+
+    const profile: ConnectionProfile = {
+      ...createStoredProfile(),
+      id: 'retention-conn-1',
+      secretRef: 'retention-conn-1',
+    }
+
+    await repository.save(profile)
+    await secretStore.saveSecret(profile.id, { password: 'secret' })
+
+    const policyList: RetentionPolicy[] = [
+      {
+        dataset: 'timelineEvents',
+        retentionDays: 30,
+        storageBudgetMb: 1,
+        autoPurgeOldest: true,
+      },
+      {
+        dataset: 'observabilitySnapshots',
+        retentionDays: 30,
+        storageBudgetMb: 64,
+        autoPurgeOldest: true,
+      },
+      {
+        dataset: 'workflowHistory',
+        retentionDays: 30,
+        storageBudgetMb: 64,
+        autoPurgeOldest: true,
+      },
+      {
+        dataset: 'incidentArtifacts',
+        retentionDays: 30,
+        storageBudgetMb: 64,
+        autoPurgeOldest: true,
+      },
+    ]
+
+    const summary: StorageSummary = {
+      generatedAt: new Date().toISOString(),
+      datasets: [
+        {
+          dataset: 'timelineEvents',
+          rowCount: 10,
+          totalBytes: 2_097_152,
+          budgetBytes: 1_048_576,
+          usageRatio: 2,
+          overBudget: true,
+        },
+        {
+          dataset: 'observabilitySnapshots',
+          rowCount: 1,
+          totalBytes: 256,
+          budgetBytes: 67_108_864,
+          usageRatio: 0,
+          overBudget: false,
+        },
+        {
+          dataset: 'workflowHistory',
+          rowCount: 0,
+          totalBytes: 0,
+          budgetBytes: 67_108_864,
+          usageRatio: 0,
+          overBudget: false,
+        },
+        {
+          dataset: 'incidentArtifacts',
+          rowCount: 0,
+          totalBytes: 0,
+          budgetBytes: 67_108_864,
+          usageRatio: 0,
+          overBudget: false,
+        },
+      ],
+      totalBytes: 2_097_408,
+    }
+
+    const savePolicyMock = vi.fn(async () => undefined)
+    const purgeMock = vi.fn(async (request: {
+      dataset: 'timelineEvents' | 'observabilitySnapshots' | 'workflowHistory' | 'incidentArtifacts'
+      olderThan?: string
+      dryRun?: boolean
+    }) => ({
+      dataset: request.dataset,
+      cutoff: request.olderThan ?? new Date().toISOString(),
+      dryRun: Boolean(request.dryRun),
+      deletedRows: request.dryRun ? 5 : 10,
+      freedBytes: request.dryRun ? 500 : 1000,
+    }))
+    const retentionRepository: RetentionRepository = {
+      listPolicies: vi.fn(async () => policyList),
+      savePolicy: savePolicyMock,
+      purge: purgeMock,
+      getStorageSummary: vi.fn(async () => summary),
+    }
+
+    const service = new CachifyService(
+      repository,
+      secretStore,
+      memcachedIndex,
+      gateway,
+      {
+        retentionRepository,
+      },
+    )
+
+    const listed = await service.listRetentionPolicies()
+    expect(listed.policies).toHaveLength(4)
+
+    const updated = await service.updateRetentionPolicy({
+      policy: {
+        dataset: 'timelineEvents',
+        retentionDays: 0,
+        storageBudgetMb: 0,
+        autoPurgeOldest: false,
+      },
+    })
+
+    expect(updated.retentionDays).toBe(1)
+    expect(updated.storageBudgetMb).toBe(1)
+    expect(savePolicyMock).toHaveBeenCalledWith(updated)
+
+    await service.setKey({
+      connectionId: profile.id,
+      key: 'retention:key',
+      value: 'value',
+    })
+
+    expect(purgeMock).toHaveBeenCalledWith({
+      dataset: 'timelineEvents',
+      dryRun: false,
+    })
+
+    const dryRunPurge = await service.purgeRetentionData({
+      dataset: 'workflowHistory',
+      dryRun: true,
+    })
+    expect(dryRunPurge.dryRun).toBe(true)
+    expect(dryRunPurge.dataset).toBe('workflowHistory')
+
+    const storageSummary = await service.getStorageSummary()
+    expect(storageSummary.totalBytes).toBe(summary.totalBytes)
   })
 })

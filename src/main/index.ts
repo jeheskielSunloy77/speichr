@@ -16,10 +16,13 @@ import {
   SqliteAlertRuleRepository,
   createSqliteDatabase,
   SqliteConnectionRepository,
+  SqliteGovernanceAssignmentRepository,
+  SqliteGovernancePolicyPackRepository,
   SqliteHistoryRepository,
   SqliteIncidentBundleRepository,
   SqliteMemcachedKeyIndexRepository,
   SqliteObservabilityRepository,
+  SqliteRetentionRepository,
   SqliteSnapshotRepository,
   SqliteWorkflowExecutionRepository,
   SqliteWorkflowTemplateRepository,
@@ -53,7 +56,14 @@ const initializeRuntime = (): RuntimeContext => {
   const observabilityRepository = new SqliteObservabilityRepository(db)
   const alertRepository = new SqliteAlertRepository(db)
   const alertRuleRepository = new SqliteAlertRuleRepository(db)
+  const governancePolicyPackRepository = new SqliteGovernancePolicyPackRepository(
+    db,
+  )
+  const governanceAssignmentRepository = new SqliteGovernanceAssignmentRepository(
+    db,
+  )
   const incidentBundleRepository = new SqliteIncidentBundleRepository(db)
+  const retentionRepository = new SqliteRetentionRepository(db)
 
   const secretStore =
     process.env.CACHIFY_SECRET_STORE === 'memory'
@@ -80,7 +90,10 @@ const initializeRuntime = (): RuntimeContext => {
       observabilityRepository,
       alertRepository,
       alertRuleRepository,
+      governancePolicyPackRepository,
+      governanceAssignmentRepository,
       incidentBundleRepository,
+      retentionRepository,
       notificationPublisher,
       engineEventIngestor,
     },

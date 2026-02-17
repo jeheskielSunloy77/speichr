@@ -92,11 +92,14 @@ import type {
   ConnectionRepository,
   EngineEventIngestor,
   EngineTimelineEventInput,
+  GovernanceAssignmentRepository,
+  GovernancePolicyPackRepository,
   HistoryRepository,
   IncidentBundleRepository,
   MemcachedKeyIndexRepository,
   NotificationPublisher,
   ObservabilityRepository,
+  RetentionRepository,
   SecretStore,
   SnapshotRepository,
   WorkflowExecutionRepository,
@@ -109,6 +112,8 @@ const DEFAULT_RETRY_BACKOFF_MS = 250
 const DEFAULT_RETRY_ABORT_ON_ERROR_RATE = 1
 const SLOW_OPERATION_THRESHOLD_MS = 750
 const DASHBOARD_DEFAULT_LIMIT = 200
+const RETENTION_ALERT_COOLDOWN_MS = 5 * 60_000
+const RETENTION_BUDGET_WARN_RATIO = 0.9
 
 type RetryPolicy = {
   maxAttempts: number
@@ -142,7 +147,10 @@ type ServiceDependencies = {
   observabilityRepository: ObservabilityRepository
   alertRepository: AlertRepository
   alertRuleRepository: AlertRuleRepository
+  governancePolicyPackRepository: GovernancePolicyPackRepository
+  governanceAssignmentRepository: GovernanceAssignmentRepository
   incidentBundleRepository: IncidentBundleRepository
+  retentionRepository: RetentionRepository
   notificationPublisher: NotificationPublisher
   engineEventIngestor: EngineEventIngestor
 }
@@ -388,6 +396,73 @@ class InMemoryAlertRuleRepository implements AlertRuleRepository {
   }
 }
 
+class InMemoryGovernancePolicyPackRepository
+  implements GovernancePolicyPackRepository
+{
+  private readonly policyPacks = new Map<string, GovernancePolicyPack>()
+
+  public async list(): Promise<GovernancePolicyPack[]> {
+    return Array.from(this.policyPacks.values()).sort((left, right) =>
+      right.updatedAt.localeCompare(left.updatedAt),
+    )
+  }
+
+  public async findById(id: string): Promise<GovernancePolicyPack | null> {
+    return this.policyPacks.get(id) ?? null
+  }
+
+  public async save(policyPack: GovernancePolicyPack): Promise<void> {
+    this.policyPacks.set(policyPack.id, policyPack)
+  }
+
+  public async delete(id: string): Promise<void> {
+    this.policyPacks.delete(id)
+  }
+}
+
+class InMemoryGovernanceAssignmentRepository
+  implements GovernanceAssignmentRepository
+{
+  private readonly assignments = new Map<string, string>()
+
+  public async list(
+    args: GovernanceAssignmentListRequest,
+  ): Promise<GovernanceAssignment[]> {
+    if (args.connectionId) {
+      const policyPackId = this.assignments.get(args.connectionId)
+      if (!policyPackId) {
+        return []
+      }
+
+      return [
+        {
+          connectionId: args.connectionId,
+          policyPackId,
+        },
+      ]
+    }
+
+    return Array.from(this.assignments.entries()).map(
+      ([connectionId, policyPackId]) => ({
+        connectionId,
+        policyPackId,
+      }),
+    )
+  }
+
+  public async assign(args: {
+    connectionId: string
+    policyPackId?: string
+  }): Promise<void> {
+    if (!args.policyPackId) {
+      this.assignments.delete(args.connectionId)
+      return
+    }
+
+    this.assignments.set(args.connectionId, args.policyPackId)
+  }
+}
+
 class InMemoryIncidentBundleRepository implements IncidentBundleRepository {
   private readonly bundles = new Map<string, IncidentBundle>()
 
@@ -399,6 +474,65 @@ class InMemoryIncidentBundleRepository implements IncidentBundleRepository {
     return Array.from(this.bundles.values())
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
       .slice(0, limit)
+  }
+}
+
+class InMemoryRetentionRepository implements RetentionRepository {
+  private readonly policies = new Map<RetentionPolicy['dataset'], RetentionPolicy>(
+    [
+      ['timelineEvents', this.defaultPolicy('timelineEvents')],
+      ['observabilitySnapshots', this.defaultPolicy('observabilitySnapshots')],
+      ['workflowHistory', this.defaultPolicy('workflowHistory')],
+      ['incidentArtifacts', this.defaultPolicy('incidentArtifacts')],
+    ],
+  )
+
+  public async listPolicies(): Promise<RetentionPolicy[]> {
+    return Array.from(this.policies.values()).sort((left, right) =>
+      left.dataset.localeCompare(right.dataset),
+    )
+  }
+
+  public async savePolicy(policy: RetentionPolicy): Promise<void> {
+    this.policies.set(policy.dataset, policy)
+  }
+
+  public async purge(
+    request: RetentionPurgeRequest,
+  ): Promise<RetentionPurgeResult> {
+    return {
+      dataset: request.dataset,
+      cutoff: request.olderThan ?? new Date().toISOString(),
+      dryRun: Boolean(request.dryRun),
+      deletedRows: 0,
+      freedBytes: 0,
+    }
+  }
+
+  public async getStorageSummary(): Promise<StorageSummary> {
+    const datasets = (await this.listPolicies()).map((policy) => ({
+      dataset: policy.dataset,
+      rowCount: 0,
+      totalBytes: 0,
+      budgetBytes: policy.storageBudgetMb * 1024 * 1024,
+      usageRatio: 0,
+      overBudget: false,
+    }))
+
+    return {
+      generatedAt: new Date().toISOString(),
+      datasets,
+      totalBytes: 0,
+    }
+  }
+
+  private defaultPolicy(dataset: RetentionPolicy['dataset']): RetentionPolicy {
+    return {
+      dataset,
+      retentionDays: 30,
+      storageBudgetMb: 512,
+      autoPurgeOldest: true,
+    }
   }
 }
 
@@ -437,7 +571,13 @@ export class CachifyService {
 
   private readonly alertRuleRepository: AlertRuleRepository
 
+  private readonly governancePolicyPackRepository: GovernancePolicyPackRepository
+
+  private readonly governanceAssignmentRepository: GovernanceAssignmentRepository
+
   private readonly incidentBundleRepository: IncidentBundleRepository
+
+  private readonly retentionRepository: RetentionRepository
 
   private readonly notificationPublisher: NotificationPublisher
 
@@ -449,6 +589,8 @@ export class CachifyService {
   >()
 
   private readonly alertRuleCooldown = new Map<string, number>()
+
+  private readonly retentionAlertCooldown = new Map<string, number>()
 
   public constructor(
     private readonly connectionRepository: ConnectionRepository,
@@ -474,8 +616,16 @@ export class CachifyService {
       dependencies?.alertRepository ?? new InMemoryAlertRepository()
     this.alertRuleRepository =
       dependencies?.alertRuleRepository ?? new InMemoryAlertRuleRepository()
+    this.governancePolicyPackRepository =
+      dependencies?.governancePolicyPackRepository ??
+      new InMemoryGovernancePolicyPackRepository()
+    this.governanceAssignmentRepository =
+      dependencies?.governanceAssignmentRepository ??
+      new InMemoryGovernanceAssignmentRepository()
     this.incidentBundleRepository =
       dependencies?.incidentBundleRepository ?? new InMemoryIncidentBundleRepository()
+    this.retentionRepository =
+      dependencies?.retentionRepository ?? new InMemoryRetentionRepository()
     this.notificationPublisher =
       dependencies?.notificationPublisher ?? new NoopNotificationPublisher()
     this.engineEventIngestor =
@@ -948,6 +1098,16 @@ export class CachifyService {
       )
     }
 
+    const governanceContext = payload.dryRun
+      ? {
+          policyPack: undefined,
+          activeWindowId: undefined,
+        }
+      : await this.resolveGovernanceExecutionContext(profile, 'workflow.execute')
+    const maxPreviewItems = governanceContext.policyPack
+      ? Math.min(500, governanceContext.policyPack.maxWorkflowItems)
+      : 500
+
     const execution: WorkflowExecutionRecord = {
       id: uuidv4(),
       workflowTemplateId: payload.templateId,
@@ -960,6 +1120,8 @@ export class CachifyService {
       dryRun: Boolean(payload.dryRun),
       parameters,
       stepResults: [],
+      policyPackId: governanceContext.policyPack?.id,
+      scheduleWindowId: governanceContext.activeWindowId,
     }
 
     await this.workflowExecutionRepository.save(execution)
@@ -970,7 +1132,7 @@ export class CachifyService {
       template.kind,
       parameters,
       {
-        limit: 500,
+        limit: maxPreviewItems,
       },
     )
 
@@ -992,108 +1154,47 @@ export class CachifyService {
       }
 
       await this.workflowExecutionRepository.save(completed)
+      await this.enforceRetentionForDatasets(['workflowHistory'])
       return completed
     }
 
     const retryPolicy = this.resolveRetryPolicy(profile, payload.retryPolicy)
-
-    let errorCount = 0
-    const stepResults: WorkflowStepResult[] = []
-    let aborted = false
-
-    for (const item of preview.items) {
-      const stepStartedAt = Date.now()
-
-      try {
-        const run = async (): Promise<void> => {
-          if (item.action === 'delete') {
-            await this.captureSnapshot(profile, secret, item.key, 'workflow')
-            await this.cacheGateway.deleteKey(profile, secret, item.key)
-            return
-          }
-
-          if (item.action === 'setTtl') {
-            const value = await this.cacheGateway.getValue(profile, secret, item.key)
-            if (value.value === null) {
-              return
-            }
-
-            await this.cacheGateway.setValue(profile, secret, {
-              key: item.key,
-              value: value.value,
-              ttlSeconds: item.nextTtlSeconds ?? undefined,
-            })
-            return
-          }
-
-          await this.cacheGateway.setValue(profile, secret, {
-            key: item.key,
-            value: item.valuePreview ?? '',
-            ttlSeconds: item.nextTtlSeconds ?? undefined,
-          })
-        }
-
-        const telemetryAction =
-          item.action === 'delete'
-            ? 'workflow.step.delete'
-            : item.action === 'setTtl'
-              ? 'workflow.step.ttl'
-              : 'workflow.step.warmup'
-
-        const outcome = await this.executeWithPolicy({
-          profile,
-          action: telemetryAction,
-          keyOrPattern: item.key,
-          run,
-          retryPolicy,
-        })
-
-        stepResults.push({
-          step: `${item.action}:${item.key}`,
-          status: 'success',
-          attempts: outcome.attempts,
-          durationMs: Date.now() - stepStartedAt,
-        })
-      } catch (error) {
-        errorCount += 1
-
-        const failure = this.toOperationFailure(error)
-        const attempts =
-          typeof failure.details?.attempts === 'number'
-            ? Number(failure.details.attempts)
-            : retryPolicy.maxAttempts
-
-        stepResults.push({
-          step: `${item.action}:${item.key}`,
-          status: 'error',
-          attempts,
-          durationMs: Date.now() - stepStartedAt,
-          message: failure.message,
-        })
-
-        const completedStepCount = stepResults.length
-        if (errorCount / completedStepCount > retryPolicy.abortOnErrorRate) {
-          aborted = true
-          break
-        }
-      }
+    if (governanceContext.policyPack) {
+      retryPolicy.maxAttempts = Math.min(
+        retryPolicy.maxAttempts,
+        governanceContext.policyPack.maxRetryAttempts,
+      )
     }
 
+    const stepOutcome = await this.runWorkflowItems({
+      profile,
+      secret,
+      items: preview.items,
+      startIndex: 0,
+      retryPolicy,
+    })
+
     const now = new Date().toISOString()
-    const retryCount = stepResults.reduce(
+    const retryCount = stepOutcome.stepResults.reduce(
       (accumulator, step) => accumulator + Math.max(0, step.attempts - 1),
       0,
     )
 
     const status =
-      errorCount === 0 ? 'success' : aborted ? 'aborted' : 'error'
+      stepOutcome.errorCount === 0
+        ? 'success'
+        : stepOutcome.aborted
+          ? 'aborted'
+          : 'error'
 
     const result: WorkflowExecutionRecord = {
       ...execution,
       finishedAt: now,
       status,
       retryCount,
-      stepResults,
+      stepResults: stepOutcome.stepResults,
+      checkpointToken:
+        status === 'success' ? undefined : stepOutcome.checkpointToken,
       errorMessage:
         status === 'success'
           ? undefined
@@ -1103,6 +1204,7 @@ export class CachifyService {
     }
 
     await this.workflowExecutionRepository.save(result)
+    await this.enforceRetentionForDatasets(['workflowHistory'])
 
     if (status !== 'success') {
       await this.emitAlert({
@@ -1201,6 +1303,7 @@ export class CachifyService {
     }
 
     await this.historyRepository.append(event)
+    await this.enforceRetentionForDatasets(['timelineEvents'])
 
     if (event.status === 'error') {
       await this.emitAlert({
@@ -1387,10 +1490,145 @@ export class CachifyService {
       )
     }
 
-    return this.rerunWorkflow({
-      executionId: payload.executionId,
-      guardrailConfirmed: payload.guardrailConfirmed,
+    if (execution.status === 'success' || !execution.checkpointToken) {
+      throw new OperationFailure(
+        'CONFLICT',
+        'This workflow execution does not have a resumable checkpoint.',
+        false,
+        {
+          executionId: execution.id,
+          status: execution.status,
+        },
+      )
+    }
+
+    const { profile, secret } = await this.requireProfileWithSecret(
+      execution.connectionId,
+    )
+
+    await this.enforceWritable(profile, 'workflow.resume', execution.workflowName)
+    await this.enforceProdGuardrail(
+      profile,
+      'workflow.resume',
+      execution.workflowName,
+      payload.guardrailConfirmed,
+    )
+
+    const governanceContext = await this.resolveGovernanceExecutionContext(
+      profile,
+      'workflow.resume',
+    )
+    const maxPreviewItems = governanceContext.policyPack
+      ? Math.min(500, governanceContext.policyPack.maxWorkflowItems)
+      : 500
+    const preview = await this.buildWorkflowPreview(
+      profile,
+      secret,
+      execution.workflowKind,
+      execution.parameters,
+      {
+        limit: maxPreviewItems,
+      },
+    )
+    const startIndex = clampInteger(
+      Number(execution.checkpointToken),
+      0,
+      preview.items.length,
+      0,
+    )
+
+    if (startIndex >= preview.items.length) {
+      throw new OperationFailure(
+        'CONFLICT',
+        'No workflow items are pending for this checkpoint.',
+        false,
+        {
+          executionId: execution.id,
+          checkpointToken: execution.checkpointToken,
+        },
+      )
+    }
+
+    const resumedExecution: WorkflowExecutionRecord = {
+      id: uuidv4(),
+      workflowTemplateId: execution.workflowTemplateId,
+      workflowName: execution.workflowName,
+      workflowKind: execution.workflowKind,
+      connectionId: execution.connectionId,
+      startedAt: new Date().toISOString(),
+      status: 'running',
+      retryCount: 0,
+      dryRun: false,
+      parameters: execution.parameters,
+      stepResults: [],
+      policyPackId:
+        governanceContext.policyPack?.id ?? execution.policyPackId,
+      scheduleWindowId:
+        governanceContext.activeWindowId ?? execution.scheduleWindowId,
+      resumedFromExecutionId: execution.id,
+    }
+
+    await this.workflowExecutionRepository.save(resumedExecution)
+
+    const retryPolicy = this.resolveRetryPolicy(profile)
+    if (governanceContext.policyPack) {
+      retryPolicy.maxAttempts = Math.min(
+        retryPolicy.maxAttempts,
+        governanceContext.policyPack.maxRetryAttempts,
+      )
+    }
+
+    const stepOutcome = await this.runWorkflowItems({
+      profile,
+      secret,
+      items: preview.items,
+      startIndex,
+      retryPolicy,
     })
+
+    const finishedAt = new Date().toISOString()
+    const retryCount = stepOutcome.stepResults.reduce(
+      (accumulator, step) => accumulator + Math.max(0, step.attempts - 1),
+      0,
+    )
+    const status =
+      stepOutcome.errorCount === 0
+        ? 'success'
+        : stepOutcome.aborted
+          ? 'aborted'
+          : 'error'
+
+    const result: WorkflowExecutionRecord = {
+      ...resumedExecution,
+      finishedAt,
+      status,
+      retryCount,
+      stepResults: stepOutcome.stepResults,
+      checkpointToken:
+        status === 'success' ? undefined : stepOutcome.checkpointToken,
+      errorMessage:
+        status === 'success'
+          ? undefined
+          : status === 'aborted'
+            ? 'Workflow aborted by error-rate policy.'
+            : 'One or more workflow steps failed.',
+    }
+
+    await this.workflowExecutionRepository.save(result)
+    await this.enforceRetentionForDatasets(['workflowHistory'])
+
+    if (status !== 'success') {
+      await this.emitAlert({
+        connectionId: profile.id,
+        environment: profile.environment,
+        severity: status === 'aborted' ? 'critical' : 'warning',
+        title: `Workflow ${status}`,
+        message: `${execution.workflowName} completed with status: ${status}.`,
+        source: 'workflow',
+      })
+    }
+
+    return result
   }
 
   public async getKeyspaceActivity(
@@ -1744,6 +1982,7 @@ export class CachifyService {
     }
 
     await this.incidentBundleRepository.save(bundle)
+    await this.enforceRetentionForDatasets(['incidentArtifacts'])
 
     return bundle
   }
@@ -1817,98 +2056,434 @@ export class CachifyService {
   }
 
   public async listGovernancePolicyPacks(): Promise<GovernancePolicyPack[]> {
-    return []
+    return this.governancePolicyPackRepository.list()
   }
 
   public async createGovernancePolicyPack(
     payload: GovernancePolicyPackCreateRequest,
   ): Promise<GovernancePolicyPack> {
-    void payload
-    this.unsupportedV3('governance policy pack create')
+    const now = new Date().toISOString()
+    const policyPack: GovernancePolicyPack = {
+      id: uuidv4(),
+      name: payload.policyPack.name.trim(),
+      description: payload.policyPack.description?.trim() || undefined,
+      environments: payload.policyPack.environments,
+      maxWorkflowItems: clampInteger(
+        payload.policyPack.maxWorkflowItems,
+        1,
+        10000,
+        500,
+      ),
+      maxRetryAttempts: clampInteger(
+        payload.policyPack.maxRetryAttempts,
+        1,
+        10,
+        1,
+      ),
+      schedulingEnabled: payload.policyPack.schedulingEnabled,
+      executionWindows: payload.policyPack.executionWindows,
+      enabled: payload.policyPack.enabled,
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    await this.governancePolicyPackRepository.save(policyPack)
+
+    return policyPack
   }
 
   public async updateGovernancePolicyPack(
     payload: GovernancePolicyPackUpdateRequest,
   ): Promise<GovernancePolicyPack> {
-    void payload
-    this.unsupportedV3('governance policy pack update')
+    const existing = await this.governancePolicyPackRepository.findById(payload.id)
+    if (!existing) {
+      throw new OperationFailure(
+        'VALIDATION_ERROR',
+        'Governance policy pack was not found.',
+        false,
+        { id: payload.id },
+      )
+    }
+
+    const policyPack: GovernancePolicyPack = {
+      ...existing,
+      name: payload.policyPack.name.trim(),
+      description: payload.policyPack.description?.trim() || undefined,
+      environments: payload.policyPack.environments,
+      maxWorkflowItems: clampInteger(
+        payload.policyPack.maxWorkflowItems,
+        1,
+        10000,
+        existing.maxWorkflowItems,
+      ),
+      maxRetryAttempts: clampInteger(
+        payload.policyPack.maxRetryAttempts,
+        1,
+        10,
+        existing.maxRetryAttempts,
+      ),
+      schedulingEnabled: payload.policyPack.schedulingEnabled,
+      executionWindows: payload.policyPack.executionWindows,
+      enabled: payload.policyPack.enabled,
+      updatedAt: new Date().toISOString(),
+    }
+
+    await this.governancePolicyPackRepository.save(policyPack)
+
+    return policyPack
   }
 
   public async deleteGovernancePolicyPack(
     payload: GovernancePolicyPackDeleteRequest,
   ): Promise<MutationResult> {
-    void payload
-    this.unsupportedV3('governance policy pack delete')
+    await this.governancePolicyPackRepository.delete(payload.id)
+
+    const assignments = await this.governanceAssignmentRepository.list({})
+    await Promise.all(
+      assignments
+        .filter((assignment) => assignment.policyPackId === payload.id)
+        .map((assignment) =>
+          this.governanceAssignmentRepository.assign({
+            connectionId: assignment.connectionId,
+            policyPackId: undefined,
+          }),
+        ),
+    )
+
+    return {
+      success: true,
+    }
   }
 
   public async assignGovernancePolicyPack(
     payload: GovernanceAssignmentRequest,
   ): Promise<MutationResult> {
-    void payload
-    this.unsupportedV3('governance policy pack assignment')
+    await this.requireConnection(payload.connectionId)
+
+    if (payload.policyPackId) {
+      const policyPack = await this.governancePolicyPackRepository.findById(
+        payload.policyPackId,
+      )
+      if (!policyPack) {
+        throw new OperationFailure(
+          'VALIDATION_ERROR',
+          'Governance policy pack was not found.',
+          false,
+          { id: payload.policyPackId },
+        )
+      }
+    }
+
+    await this.governanceAssignmentRepository.assign({
+      connectionId: payload.connectionId,
+      policyPackId: payload.policyPackId,
+    })
+
+    return {
+      success: true,
+    }
   }
 
   public async listGovernanceAssignments(
     payload: GovernanceAssignmentListRequest,
   ): Promise<GovernanceAssignment[]> {
-    void payload
-    return []
+    return this.governanceAssignmentRepository.list(payload)
   }
 
   public async listRetentionPolicies(): Promise<RetentionPolicyListResult> {
     return {
-      policies: [
-        {
-          dataset: 'timelineEvents',
-          retentionDays: 30,
-          storageBudgetMb: 512,
-          autoPurgeOldest: true,
-        },
-        {
-          dataset: 'observabilitySnapshots',
-          retentionDays: 30,
-          storageBudgetMb: 512,
-          autoPurgeOldest: true,
-        },
-        {
-          dataset: 'workflowHistory',
-          retentionDays: 30,
-          storageBudgetMb: 512,
-          autoPurgeOldest: true,
-        },
-        {
-          dataset: 'incidentArtifacts',
-          retentionDays: 30,
-          storageBudgetMb: 512,
-          autoPurgeOldest: true,
-        },
-      ],
+      policies: await this.retentionRepository.listPolicies(),
     }
   }
 
   public async updateRetentionPolicy(
     payload: RetentionPolicyUpdateRequest,
   ): Promise<RetentionPolicy> {
-    return payload.policy
+    const policy: RetentionPolicy = {
+      dataset: payload.policy.dataset,
+      retentionDays: clampInteger(payload.policy.retentionDays, 1, 3650, 30),
+      storageBudgetMb: clampInteger(payload.policy.storageBudgetMb, 1, 100_000, 512),
+      autoPurgeOldest: payload.policy.autoPurgeOldest,
+    }
+
+    await this.retentionRepository.savePolicy(policy)
+    return policy
   }
 
   public async purgeRetentionData(
     payload: RetentionPurgeRequest,
   ): Promise<RetentionPurgeResult> {
-    return {
-      dataset: payload.dataset,
-      cutoff: payload.olderThan ?? new Date().toISOString(),
-      dryRun: Boolean(payload.dryRun),
-      deletedRows: 0,
-      freedBytes: 0,
-    }
+    return this.retentionRepository.purge(payload)
   }
 
   public async getStorageSummary(): Promise<StorageSummary> {
+    const summary = await this.retentionRepository.getStorageSummary()
+    await this.enforceRetentionForDatasets(
+      summary.datasets.map((dataset) => dataset.dataset),
+      summary,
+    )
+    return summary
+  }
+
+  private async enforceRetentionForDatasets(
+    datasets: RetentionPolicy['dataset'][],
+    summaryOverride?: StorageSummary,
+  ): Promise<void> {
+    const uniqueDatasets = Array.from(new Set(datasets))
+    if (uniqueDatasets.length === 0) {
+      return
+    }
+
+    const [summary, policies] = await Promise.all([
+      summaryOverride
+        ? Promise.resolve(summaryOverride)
+        : this.retentionRepository.getStorageSummary(),
+      this.retentionRepository.listPolicies(),
+    ])
+
+    const policyByDataset = new Map(
+      policies.map((policy) => [policy.dataset, policy]),
+    )
+    const summaryByDataset = new Map(
+      summary.datasets.map((dataset) => [dataset.dataset, dataset]),
+    )
+    const nowMs = Date.now()
+
+    for (const dataset of uniqueDatasets) {
+      const policy = policyByDataset.get(dataset)
+      const datasetSummary = summaryByDataset.get(dataset)
+      if (!policy || !datasetSummary) {
+        continue
+      }
+
+      const alertCooldownKey = `${dataset}:retention-budget`
+      const lastAlertAt = this.retentionAlertCooldown.get(alertCooldownKey)
+      const canEmitAlert =
+        typeof lastAlertAt !== 'number' ||
+        nowMs - lastAlertAt >= RETENTION_ALERT_COOLDOWN_MS
+
+      if (datasetSummary.overBudget && policy.autoPurgeOldest) {
+        const purgeResult = await this.retentionRepository.purge({
+          dataset,
+          dryRun: false,
+        })
+
+        if (purgeResult.deletedRows > 0 && canEmitAlert) {
+          this.retentionAlertCooldown.set(alertCooldownKey, nowMs)
+          await this.emitAlert({
+            severity: 'warning',
+            title: `Retention auto-purge executed (${dataset})`,
+            message: `Freed ${purgeResult.freedBytes} bytes by deleting ${purgeResult.deletedRows} rows.`,
+            source: 'policy',
+          })
+        }
+
+        continue
+      }
+
+      if (datasetSummary.overBudget && canEmitAlert) {
+        this.retentionAlertCooldown.set(alertCooldownKey, nowMs)
+        await this.emitAlert({
+          severity: 'warning',
+          title: `Storage budget exceeded (${dataset})`,
+          message: `Usage is ${Math.round(datasetSummary.usageRatio * 100)}% of configured budget.`,
+          source: 'policy',
+        })
+        continue
+      }
+
+      if (datasetSummary.usageRatio >= RETENTION_BUDGET_WARN_RATIO && canEmitAlert) {
+        this.retentionAlertCooldown.set(alertCooldownKey, nowMs)
+        await this.emitAlert({
+          severity: 'info',
+          title: `Storage budget warning (${dataset})`,
+          message: `Usage reached ${Math.round(datasetSummary.usageRatio * 100)}% of configured budget.`,
+          source: 'policy',
+        })
+      }
+    }
+  }
+
+  private async resolveGovernanceExecutionContext(
+    profile: ConnectionProfile,
+    action: string,
+  ): Promise<{
+    policyPack?: GovernancePolicyPack
+    activeWindowId?: string
+  }> {
+    const assignment = (
+      await this.governanceAssignmentRepository.list({
+        connectionId: profile.id,
+      })
+    )[0]
+
+    if (!assignment?.policyPackId) {
+      return {}
+    }
+
+    const policyPack = await this.governancePolicyPackRepository.findById(
+      assignment.policyPackId,
+    )
+    if (!policyPack || !policyPack.enabled) {
+      return {}
+    }
+
+    if (!policyPack.environments.includes(profile.environment)) {
+      throw new OperationFailure(
+        'UNAUTHORIZED',
+        'Assigned policy pack does not allow execution for this environment.',
+        false,
+        {
+          connectionId: profile.id,
+          action,
+          policyPackId: policyPack.id,
+          environment: profile.environment,
+        },
+      )
+    }
+
+    if (!policyPack.schedulingEnabled) {
+      return {
+        policyPack,
+      }
+    }
+
+    const now = new Date()
+    const activeWindowId = findActiveExecutionWindowId(
+      policyPack.executionWindows,
+      now,
+    )
+    if (!activeWindowId) {
+      throw new OperationFailure(
+        'UNAUTHORIZED',
+        'Execution is outside approved schedule windows for this policy pack.',
+        false,
+        {
+          connectionId: profile.id,
+          action,
+          policyPackId: policyPack.id,
+        },
+      )
+    }
+
     return {
-      generatedAt: new Date().toISOString(),
-      datasets: [],
-      totalBytes: 0,
+      policyPack,
+      activeWindowId,
+    }
+  }
+
+  private async runWorkflowItems(args: {
+    profile: ConnectionProfile
+    secret: ConnectionSecret
+    items: WorkflowDryRunPreviewItem[]
+    startIndex: number
+    retryPolicy: RetryPolicy
+  }): Promise<{
+    stepResults: WorkflowStepResult[]
+    errorCount: number
+    aborted: boolean
+    checkpointToken?: string
+  }> {
+    let errorCount = 0
+    let aborted = false
+    const stepResults: WorkflowStepResult[] = []
+    let checkpointToken: string | undefined
+
+    for (let index = args.startIndex; index < args.items.length; index += 1) {
+      const item = args.items[index]
+      const stepStartedAt = Date.now()
+
+      try {
+        const run = async (): Promise<void> => {
+          if (item.action === 'delete') {
+            await this.captureSnapshot(args.profile, args.secret, item.key, 'workflow')
+            await this.cacheGateway.deleteKey(args.profile, args.secret, item.key)
+            return
+          }
+
+          if (item.action === 'setTtl') {
+            const value = await this.cacheGateway.getValue(
+              args.profile,
+              args.secret,
+              item.key,
+            )
+            if (value.value === null) {
+              return
+            }
+
+            await this.cacheGateway.setValue(args.profile, args.secret, {
+              key: item.key,
+              value: value.value,
+              ttlSeconds: item.nextTtlSeconds ?? undefined,
+            })
+            return
+          }
+
+          await this.cacheGateway.setValue(args.profile, args.secret, {
+            key: item.key,
+            value: item.valuePreview ?? '',
+            ttlSeconds: item.nextTtlSeconds ?? undefined,
+          })
+        }
+
+        const telemetryAction =
+          item.action === 'delete'
+            ? 'workflow.step.delete'
+            : item.action === 'setTtl'
+              ? 'workflow.step.ttl'
+              : 'workflow.step.warmup'
+
+        const outcome = await this.executeWithPolicy({
+          profile: args.profile,
+          action: telemetryAction,
+          keyOrPattern: item.key,
+          run,
+          retryPolicy: args.retryPolicy,
+        })
+
+        stepResults.push({
+          step: `${item.action}:${item.key}`,
+          status: 'success',
+          attempts: outcome.attempts,
+          durationMs: Date.now() - stepStartedAt,
+        })
+      } catch (error) {
+        errorCount += 1
+
+        const failure = this.toOperationFailure(error)
+        const attempts =
+          typeof failure.details?.attempts === 'number'
+            ? Number(failure.details.attempts)
+            : args.retryPolicy.maxAttempts
+
+        stepResults.push({
+          step: `${item.action}:${item.key}`,
+          status: 'error',
+          attempts,
+          durationMs: Date.now() - stepStartedAt,
+          message: failure.message,
+        })
+
+        if (index + 1 < args.items.length) {
+          checkpointToken = String(index + 1)
+        }
+
+        const completedStepCount = stepResults.length
+        if (
+          completedStepCount > 0 &&
+          errorCount / completedStepCount > args.retryPolicy.abortOnErrorRate
+        ) {
+          aborted = true
+          break
+        }
+      }
+    }
+
+    return {
+      stepResults,
+      errorCount,
+      aborted,
+      checkpointToken,
     }
   }
 
@@ -2451,6 +3026,10 @@ export class CachifyService {
     }
 
     await this.observabilityRepository.append(snapshot)
+    await this.enforceRetentionForDatasets([
+      'timelineEvents',
+      'observabilitySnapshots',
+    ])
 
     if (event.status === 'error') {
       await this.emitAlert({
@@ -2622,14 +3201,6 @@ export class CachifyService {
       title: event.title,
       message: event.message,
     })
-  }
-
-  private unsupportedV3(feature: string): never {
-    throw new OperationFailure(
-      'NOT_SUPPORTED',
-      `V3 capability not implemented yet: ${feature}.`,
-      false,
-    )
   }
 
   private async resolveWorkflowTemplate(args: {
@@ -2839,6 +3410,69 @@ const formatMetricValue = (
   }
 
   return String(Math.round(value))
+}
+
+const findActiveExecutionWindowId = (
+  windows: GovernancePolicyPack['executionWindows'],
+  now: Date,
+): string | undefined => {
+  const weekday = toGovernanceWeekday(now.getUTCDay())
+  const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes()
+
+  for (const window of windows) {
+    if (!window.weekdays.includes(weekday)) {
+      continue
+    }
+
+    const startMinutes = parseWindowMinutes(window.startTime)
+    const endMinutes = parseWindowMinutes(window.endTime)
+    if (startMinutes === null || endMinutes === null) {
+      continue
+    }
+
+    const inWindow =
+      endMinutes >= startMinutes
+        ? currentMinutes >= startMinutes && currentMinutes <= endMinutes
+        : currentMinutes >= startMinutes || currentMinutes <= endMinutes
+
+    if (inWindow) {
+      return window.id
+    }
+  }
+
+  return undefined
+}
+
+const parseWindowMinutes = (value: string): number | null => {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value)
+  if (!match) {
+    return null
+  }
+
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  return hours * 60 + minutes
+}
+
+const toGovernanceWeekday = (
+  utcWeekday: number,
+): GovernancePolicyPack['executionWindows'][number]['weekdays'][number] => {
+  switch (utcWeekday) {
+    case 0:
+      return 'sun'
+    case 1:
+      return 'mon'
+    case 2:
+      return 'tue'
+    case 3:
+      return 'wed'
+    case 4:
+      return 'thu'
+    case 5:
+      return 'fri'
+    default:
+      return 'sat'
+  }
 }
 
 const isBuiltinWorkflowId = (id: string): boolean =>
