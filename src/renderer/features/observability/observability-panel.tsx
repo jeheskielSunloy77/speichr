@@ -1,5 +1,6 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as React from 'react'
+import { toast } from 'sonner'
 
 import { Badge } from '@/renderer/components/ui/badge'
 import { Button } from '@/renderer/components/ui/button'
@@ -10,6 +11,9 @@ import {
   CardHeader,
   CardTitle,
 } from '@/renderer/components/ui/card'
+import { Checkbox } from '@/renderer/components/ui/checkbox'
+import { Input } from '@/renderer/components/ui/input'
+import { Label } from '@/renderer/components/ui/label'
 import {
   Table,
   TableBody,
@@ -19,10 +23,33 @@ import {
   TableRow,
 } from '@/renderer/components/ui/table'
 import { unwrapResponse } from '@/renderer/features/common/ipc'
-import type { ConnectionProfile } from '@/shared/contracts/cache'
+import type { ConnectionProfile, IncidentBundleInclude } from '@/shared/contracts/cache'
 
 type ObservabilityPanelProps = {
   connection: ConnectionProfile
+}
+
+const ONE_HOUR_MS = 60 * 60 * 1000
+
+const incidentIncludeOptions: IncidentBundleInclude[] = [
+  'timeline',
+  'logs',
+  'diagnostics',
+  'metrics',
+]
+
+const toLocalDateTimeValue = (value: Date): string => {
+  const offsetMs = value.getTimezoneOffset() * 60_000
+  return new Date(value.getTime() - offsetMs).toISOString().slice(0, 16)
+}
+
+const toIsoOrFallback = (value: string, fallback: Date): string => {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return fallback.toISOString()
+  }
+
+  return parsed.toISOString()
 }
 
 const getHealthVariant = (
@@ -39,8 +66,88 @@ const getHealthVariant = (
   return 'outline'
 }
 
+const getDirectionVariant = (
+  direction: 'improved' | 'regressed' | 'unchanged',
+): 'default' | 'outline' | 'destructive' => {
+  if (direction === 'regressed') {
+    return 'destructive'
+  }
+
+  if (direction === 'improved') {
+    return 'default'
+  }
+
+  return 'outline'
+}
+
 export const ObservabilityPanel = ({ connection }: ObservabilityPanelProps) => {
+  const queryClient = useQueryClient()
+
   const [intervalMinutes, setIntervalMinutes] = React.useState('5')
+
+  const [activityFrom, setActivityFrom] = React.useState(() =>
+    toLocalDateTimeValue(new Date(Date.now() - ONE_HOUR_MS)),
+  )
+  const [activityTo, setActivityTo] = React.useState(() =>
+    toLocalDateTimeValue(new Date()),
+  )
+  const [activityIntervalMinutes, setActivityIntervalMinutes] = React.useState('5')
+
+  const [failedFrom, setFailedFrom] = React.useState(() =>
+    toLocalDateTimeValue(new Date(Date.now() - ONE_HOUR_MS)),
+  )
+  const [failedTo, setFailedTo] = React.useState(() =>
+    toLocalDateTimeValue(new Date()),
+  )
+  const [failedLimit, setFailedLimit] = React.useState('50')
+
+  const [baselineFrom, setBaselineFrom] = React.useState(() =>
+    toLocalDateTimeValue(new Date(Date.now() - ONE_HOUR_MS * 2)),
+  )
+  const [baselineTo, setBaselineTo] = React.useState(() =>
+    toLocalDateTimeValue(new Date(Date.now() - ONE_HOUR_MS)),
+  )
+  const [compareFrom, setCompareFrom] = React.useState(() =>
+    toLocalDateTimeValue(new Date(Date.now() - ONE_HOUR_MS)),
+  )
+  const [compareTo, setCompareTo] = React.useState(() =>
+    toLocalDateTimeValue(new Date()),
+  )
+
+  const [incidentFrom, setIncidentFrom] = React.useState(() =>
+    toLocalDateTimeValue(new Date(Date.now() - ONE_HOUR_MS)),
+  )
+  const [incidentTo, setIncidentTo] = React.useState(() =>
+    toLocalDateTimeValue(new Date()),
+  )
+  const [incidentRedactionProfile, setIncidentRedactionProfile] = React.useState<
+    'default' | 'strict'
+  >('default')
+  const [incidentDestinationPath, setIncidentDestinationPath] = React.useState('')
+  const [incidentIncludeState, setIncidentIncludeState] = React.useState<
+    Record<IncidentBundleInclude, boolean>
+  >({
+    timeline: true,
+    logs: true,
+    diagnostics: true,
+    metrics: true,
+  })
+  const [incidentPreview, setIncidentPreview] = React.useState<{
+    timelineCount: number
+    logCount: number
+    diagnosticCount: number
+    metricCount: number
+    estimatedSizeBytes: number
+    checksumPreview: string
+  } | null>(null)
+
+  const selectedIncidentIncludes = React.useMemo(
+    () =>
+      incidentIncludeOptions.filter(
+        (include) => incidentIncludeState[include],
+      ),
+    [incidentIncludeState],
+  )
 
   const dashboardQuery = useQuery({
     queryKey: ['observability-dashboard', connection.id, intervalMinutes],
@@ -52,6 +159,147 @@ export const ObservabilityPanel = ({ connection }: ObservabilityPanelProps) => {
           limit: 300,
         }),
       ),
+  })
+
+  const keyspaceQuery = useQuery({
+    queryKey: [
+      'observability-keyspace',
+      connection.id,
+      activityFrom,
+      activityTo,
+      activityIntervalMinutes,
+    ],
+    queryFn: async () =>
+      unwrapResponse(
+        await window.cachify.getKeyspaceActivity({
+          connectionId: connection.id,
+          from: toIsoOrFallback(
+            activityFrom,
+            new Date(Date.now() - ONE_HOUR_MS),
+          ),
+          to: toIsoOrFallback(activityTo, new Date()),
+          intervalMinutes: Math.max(1, Number(activityIntervalMinutes) || 5),
+          limit: 200,
+        }),
+      ),
+  })
+
+  const failedQuery = useQuery({
+    queryKey: ['observability-failures', connection.id, failedFrom, failedTo, failedLimit],
+    queryFn: async () =>
+      unwrapResponse(
+        await window.cachify.getFailedOperationDrilldown({
+          connectionId: connection.id,
+          from: toIsoOrFallback(failedFrom, new Date(Date.now() - ONE_HOUR_MS)),
+          to: toIsoOrFallback(failedTo, new Date()),
+          limit: Math.max(1, Number(failedLimit) || 50),
+        }),
+      ),
+  })
+
+  const compareQuery = useQuery({
+    queryKey: [
+      'observability-compare',
+      connection.id,
+      baselineFrom,
+      baselineTo,
+      compareFrom,
+      compareTo,
+    ],
+    queryFn: async () =>
+      unwrapResponse(
+        await window.cachify.comparePeriods({
+          connectionId: connection.id,
+          baselineFrom: toIsoOrFallback(
+            baselineFrom,
+            new Date(Date.now() - ONE_HOUR_MS * 2),
+          ),
+          baselineTo: toIsoOrFallback(
+            baselineTo,
+            new Date(Date.now() - ONE_HOUR_MS),
+          ),
+          compareFrom: toIsoOrFallback(
+            compareFrom,
+            new Date(Date.now() - ONE_HOUR_MS),
+          ),
+          compareTo: toIsoOrFallback(compareTo, new Date()),
+        }),
+      ),
+  })
+
+  const incidentBundlesQuery = useQuery({
+    queryKey: ['incident-bundles'],
+    queryFn: async () =>
+      unwrapResponse(
+        await window.cachify.listIncidentBundles({
+          limit: 20,
+        }),
+      ),
+  })
+
+  const buildIncidentRequest = React.useCallback(() => {
+    if (selectedIncidentIncludes.length === 0) {
+      throw new Error('Select at least one incident artifact include option.')
+    }
+
+    return {
+      from: toIsoOrFallback(incidentFrom, new Date(Date.now() - ONE_HOUR_MS)),
+      to: toIsoOrFallback(incidentTo, new Date()),
+      connectionIds: [connection.id],
+      includes: selectedIncidentIncludes,
+      redactionProfile: incidentRedactionProfile,
+    }
+  }, [
+    selectedIncidentIncludes,
+    incidentFrom,
+    incidentTo,
+    connection.id,
+    incidentRedactionProfile,
+  ])
+
+  const incidentPreviewMutation = useMutation({
+    mutationFn: async () =>
+      unwrapResponse(
+        await window.cachify.previewIncidentBundle(buildIncidentRequest()),
+      ),
+    onSuccess: (preview) => {
+      setIncidentPreview({
+        timelineCount: preview.timelineCount,
+        logCount: preview.logCount,
+        diagnosticCount: preview.diagnosticCount,
+        metricCount: preview.metricCount,
+        estimatedSizeBytes: preview.estimatedSizeBytes,
+        checksumPreview: preview.checksumPreview,
+      })
+      toast.success('Incident bundle preview generated.')
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Unable to preview incident bundle.',
+      )
+    },
+  })
+
+  const incidentExportMutation = useMutation({
+    mutationFn: async () =>
+      unwrapResponse(
+        await window.cachify.exportIncidentBundle({
+          ...buildIncidentRequest(),
+          destinationPath:
+            incidentDestinationPath.trim().length > 0
+              ? incidentDestinationPath.trim()
+              : undefined,
+        }),
+      ),
+    onSuccess: async (bundle) => {
+      toast.success(`Incident bundle exported to ${bundle.artifactPath}.`)
+      await queryClient.invalidateQueries({ queryKey: ['incident-bundles'] })
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Unable to export incident bundle.',
+      )
+    },
   })
 
   const dashboard = dashboardQuery.data
@@ -239,6 +487,410 @@ export const ObservabilityPanel = ({ connection }: ObservabilityPanelProps) => {
           </CardContent>
         </Card>
       </div>
+
+      <div className='grid min-h-0 gap-3 xl:grid-cols-2'>
+        <Card className='min-h-0'>
+          <CardHeader>
+            <CardTitle>Keyspace Activity</CardTitle>
+            <CardDescription>
+              Top touched key patterns and temporal distribution.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className='space-y-3'>
+            <div className='grid gap-3 md:grid-cols-3'>
+              <div className='space-y-1.5'>
+                <Label htmlFor='activity-from'>From</Label>
+                <Input
+                  id='activity-from'
+                  type='datetime-local'
+                  value={activityFrom}
+                  onChange={(event) => setActivityFrom(event.target.value)}
+                />
+              </div>
+              <div className='space-y-1.5'>
+                <Label htmlFor='activity-to'>To</Label>
+                <Input
+                  id='activity-to'
+                  type='datetime-local'
+                  value={activityTo}
+                  onChange={(event) => setActivityTo(event.target.value)}
+                />
+              </div>
+              <div className='space-y-1.5'>
+                <Label htmlFor='activity-interval'>Interval (minutes)</Label>
+                <Input
+                  id='activity-interval'
+                  value={activityIntervalMinutes}
+                  onChange={(event) =>
+                    setActivityIntervalMinutes(event.target.value)
+                  }
+                />
+              </div>
+            </div>
+
+            {keyspaceQuery.isLoading ? (
+              <p className='text-muted-foreground text-xs'>Loading keyspace activity...</p>
+            ) : keyspaceQuery.isError ? (
+              <p className='text-destructive text-xs'>
+                {keyspaceQuery.error instanceof Error
+                  ? keyspaceQuery.error.message
+                  : 'Failed to load keyspace activity.'}
+              </p>
+            ) : (
+              <div className='grid gap-3 lg:grid-cols-2'>
+                <div className='max-h-64 overflow-auto border'>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Pattern</TableHead>
+                        <TableHead>Touches</TableHead>
+                        <TableHead>Errors</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(keyspaceQuery.data?.topPatterns ?? []).map((pattern) => (
+                        <TableRow key={pattern.pattern}>
+                          <TableCell>{pattern.pattern}</TableCell>
+                          <TableCell>{pattern.touchCount}</TableCell>
+                          <TableCell>{pattern.errorCount}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div className='max-h-64 overflow-auto border'>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Bucket</TableHead>
+                        <TableHead>Touches</TableHead>
+                        <TableHead>Errors</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(keyspaceQuery.data?.distribution ?? []).map((point) => (
+                        <TableRow key={point.bucket}>
+                          <TableCell>{new Date(point.bucket).toLocaleString()}</TableCell>
+                          <TableCell>{point.touches}</TableCell>
+                          <TableCell>{point.errors}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className='min-h-0'>
+          <CardHeader>
+            <CardTitle>Failed Operation Drilldown</CardTitle>
+            <CardDescription>
+              Links failed events to retry context, related timeline events, and latest
+              snapshots.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className='space-y-3'>
+            <div className='grid gap-3 md:grid-cols-3'>
+              <div className='space-y-1.5'>
+                <Label htmlFor='failed-from'>From</Label>
+                <Input
+                  id='failed-from'
+                  type='datetime-local'
+                  value={failedFrom}
+                  onChange={(event) => setFailedFrom(event.target.value)}
+                />
+              </div>
+              <div className='space-y-1.5'>
+                <Label htmlFor='failed-to'>To</Label>
+                <Input
+                  id='failed-to'
+                  type='datetime-local'
+                  value={failedTo}
+                  onChange={(event) => setFailedTo(event.target.value)}
+                />
+              </div>
+              <div className='space-y-1.5'>
+                <Label htmlFor='failed-limit'>Limit</Label>
+                <Input
+                  id='failed-limit'
+                  value={failedLimit}
+                  onChange={(event) => setFailedLimit(event.target.value)}
+                />
+              </div>
+            </div>
+
+            {failedQuery.isLoading ? (
+              <p className='text-muted-foreground text-xs'>Loading diagnostics...</p>
+            ) : failedQuery.isError ? (
+              <p className='text-destructive text-xs'>
+                {failedQuery.error instanceof Error
+                  ? failedQuery.error.message
+                  : 'Failed to load failed-operation diagnostics.'}
+              </p>
+            ) : (failedQuery.data?.diagnostics.length ?? 0) === 0 ? (
+              <p className='text-muted-foreground text-xs'>
+                No failed-operation diagnostics in this window.
+              </p>
+            ) : (
+              <div className='max-h-72 space-y-2 overflow-auto'>
+                {failedQuery.data?.diagnostics.map((diagnostic) => (
+                  <div key={diagnostic.event.id} className='space-y-1 border p-2 text-xs'>
+                    <div className='flex items-center justify-between gap-2'>
+                      <p className='truncate font-medium'>{diagnostic.event.action}</p>
+                      <Badge variant='destructive'>{diagnostic.event.status}</Badge>
+                    </div>
+                    <p className='text-muted-foreground truncate'>
+                      {diagnostic.event.keyOrPattern}
+                    </p>
+                    <div className='text-muted-foreground flex flex-wrap gap-2'>
+                      <span>retries: {diagnostic.retryAttempts}</span>
+                      <span>related events: {diagnostic.relatedEvents.length}</span>
+                      <span>
+                        occurred: {new Date(diagnostic.event.timestamp).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Compare Period Analytics</CardTitle>
+          <CardDescription>
+            Compare baseline and current windows to highlight regressions.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className='space-y-3'>
+          <div className='grid gap-3 md:grid-cols-4'>
+            <div className='space-y-1.5'>
+              <Label htmlFor='baseline-from'>Baseline From</Label>
+              <Input
+                id='baseline-from'
+                type='datetime-local'
+                value={baselineFrom}
+                onChange={(event) => setBaselineFrom(event.target.value)}
+              />
+            </div>
+            <div className='space-y-1.5'>
+              <Label htmlFor='baseline-to'>Baseline To</Label>
+              <Input
+                id='baseline-to'
+                type='datetime-local'
+                value={baselineTo}
+                onChange={(event) => setBaselineTo(event.target.value)}
+              />
+            </div>
+            <div className='space-y-1.5'>
+              <Label htmlFor='compare-from'>Compare From</Label>
+              <Input
+                id='compare-from'
+                type='datetime-local'
+                value={compareFrom}
+                onChange={(event) => setCompareFrom(event.target.value)}
+              />
+            </div>
+            <div className='space-y-1.5'>
+              <Label htmlFor='compare-to'>Compare To</Label>
+              <Input
+                id='compare-to'
+                type='datetime-local'
+                value={compareTo}
+                onChange={(event) => setCompareTo(event.target.value)}
+              />
+            </div>
+          </div>
+
+          {compareQuery.isLoading ? (
+            <p className='text-muted-foreground text-xs'>Comparing periods...</p>
+          ) : compareQuery.isError ? (
+            <p className='text-destructive text-xs'>
+              {compareQuery.error instanceof Error
+                ? compareQuery.error.message
+                : 'Failed to compare periods.'}
+            </p>
+          ) : (
+            <div className='max-h-72 overflow-auto border'>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Metric</TableHead>
+                    <TableHead>Baseline</TableHead>
+                    <TableHead>Compare</TableHead>
+                    <TableHead>Delta</TableHead>
+                    <TableHead>Direction</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(compareQuery.data?.metrics ?? []).map((metric) => (
+                    <TableRow key={metric.metric}>
+                      <TableCell>{metric.metric}</TableCell>
+                      <TableCell>{metric.baseline}</TableCell>
+                      <TableCell>{metric.compare}</TableCell>
+                      <TableCell>
+                        {metric.delta} (
+                        {metric.deltaPercent === null
+                          ? 'n/a'
+                          : `${metric.deltaPercent}%`}
+                        )
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={getDirectionVariant(metric.direction)}>
+                          {metric.direction}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Incident Bundle Preview and Export</CardTitle>
+          <CardDescription>
+            Preview timeline/log/diagnostic/metric payloads and export with checksum and
+            redaction profile metadata.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className='space-y-3'>
+          <div className='grid gap-3 md:grid-cols-4'>
+            <div className='space-y-1.5'>
+              <Label htmlFor='incident-from'>From</Label>
+              <Input
+                id='incident-from'
+                type='datetime-local'
+                value={incidentFrom}
+                onChange={(event) => setIncidentFrom(event.target.value)}
+              />
+            </div>
+            <div className='space-y-1.5'>
+              <Label htmlFor='incident-to'>To</Label>
+              <Input
+                id='incident-to'
+                type='datetime-local'
+                value={incidentTo}
+                onChange={(event) => setIncidentTo(event.target.value)}
+              />
+            </div>
+            <div className='space-y-1.5'>
+              <Label htmlFor='incident-redaction'>Redaction Profile</Label>
+              <select
+                id='incident-redaction'
+                className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
+                value={incidentRedactionProfile}
+                onChange={(event) =>
+                  setIncidentRedactionProfile(
+                    event.target.value as 'default' | 'strict',
+                  )
+                }
+              >
+                <option value='default'>default</option>
+                <option value='strict'>strict</option>
+              </select>
+            </div>
+            <div className='space-y-1.5'>
+              <Label htmlFor='incident-destination'>Destination Path (optional)</Label>
+              <Input
+                id='incident-destination'
+                value={incidentDestinationPath}
+                onChange={(event) => setIncidentDestinationPath(event.target.value)}
+                placeholder='/tmp/cachify-incident.json'
+              />
+            </div>
+          </div>
+
+          <div className='space-y-2 rounded-none border p-2 text-xs'>
+            <p className='font-medium'>Includes</p>
+            <div className='grid gap-2 md:grid-cols-4'>
+              {incidentIncludeOptions.map((include) => (
+                <label key={include} className='flex items-center gap-2'>
+                  <Checkbox
+                    checked={incidentIncludeState[include]}
+                    onCheckedChange={(checked) =>
+                      setIncidentIncludeState((current) => ({
+                        ...current,
+                        [include]: Boolean(checked),
+                      }))
+                    }
+                  />
+                  {include}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className='flex flex-wrap gap-2'>
+            <Button
+              variant='outline'
+              onClick={() => incidentPreviewMutation.mutate()}
+              disabled={incidentPreviewMutation.isPending}
+            >
+              Preview Bundle
+            </Button>
+            <Button
+              onClick={() => incidentExportMutation.mutate()}
+              disabled={incidentExportMutation.isPending}
+            >
+              Export Bundle
+            </Button>
+          </div>
+
+          {incidentPreview && (
+            <div className='grid gap-2 rounded-none border p-2 text-xs md:grid-cols-3'>
+              <span>timeline: {incidentPreview.timelineCount}</span>
+              <span>logs: {incidentPreview.logCount}</span>
+              <span>diagnostics: {incidentPreview.diagnosticCount}</span>
+              <span>metrics: {incidentPreview.metricCount}</span>
+              <span>size: {incidentPreview.estimatedSizeBytes} bytes</span>
+              <span className='truncate'>checksum: {incidentPreview.checksumPreview}</span>
+            </div>
+          )}
+
+          <div className='space-y-2'>
+            <p className='text-xs font-medium'>Recent Incident Bundles</p>
+            {incidentBundlesQuery.isLoading ? (
+              <p className='text-muted-foreground text-xs'>Loading incident bundles...</p>
+            ) : (incidentBundlesQuery.data?.length ?? 0) === 0 ? (
+              <p className='text-muted-foreground text-xs'>No incident bundles exported yet.</p>
+            ) : (
+              <div className='max-h-56 overflow-auto border'>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Created</TableHead>
+                      <TableHead>Redaction</TableHead>
+                      <TableHead>Artifacts</TableHead>
+                      <TableHead>Checksum</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {incidentBundlesQuery.data?.map((bundle) => (
+                      <TableRow key={bundle.id}>
+                        <TableCell>{new Date(bundle.createdAt).toLocaleString()}</TableCell>
+                        <TableCell>{bundle.redactionProfile}</TableCell>
+                        <TableCell>
+                          {bundle.timelineCount}/{bundle.logCount}/
+                          {bundle.diagnosticCount}/{bundle.metricCount}
+                        </TableCell>
+                        <TableCell className='max-w-56 truncate'>{bundle.checksum}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }
