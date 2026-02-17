@@ -796,7 +796,7 @@ export default function App() {
               </TabsContent>
 
               <TabsContent value='alerts' className='min-h-0 overflow-auto'>
-                <AlertsPanel />
+                <AlertsPanel connection={selectedConnection} />
               </TabsContent>
             </Tabs>
           </div>
