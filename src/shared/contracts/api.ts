@@ -1,15 +1,29 @@
 import type {
+  AlertListRequest,
+  AlertMarkReadRequest,
   ConnectionCapabilitiesRequest,
   ConnectionCreateRequest,
   ConnectionDeleteRequest,
   ConnectionGetRequest,
   ConnectionTestRequest,
   ConnectionUpdateRequest,
+  HistoryQueryRequest,
   KeyDeleteRequest,
   KeyGetRequest,
   KeyListRequest,
   KeySearchRequest,
   KeySetRequest,
+  ObservabilityDashboardRequest,
+  RollbackRestoreRequest,
+  SnapshotListRequest,
+  WorkflowExecuteRequest,
+  WorkflowExecutionGetRequest,
+  WorkflowExecutionListRequest,
+  WorkflowRerunRequest,
+  WorkflowTemplateCreateRequest,
+  WorkflowTemplateDeleteRequest,
+  WorkflowTemplatePreviewRequest,
+  WorkflowTemplateUpdateRequest,
 } from './cache'
 import type {
   CommandResultMap,
@@ -52,4 +66,49 @@ export interface CachifyApi {
   deleteKey: (
     payload: KeyDeleteRequest,
   ) => Promise<IpcResponseEnvelope<CommandResultMap['key.delete']>>
+  listSnapshots: (
+    payload: SnapshotListRequest,
+  ) => Promise<IpcResponseEnvelope<QueryResultMap['snapshot.list']>>
+  restoreSnapshot: (
+    payload: RollbackRestoreRequest,
+  ) => Promise<IpcResponseEnvelope<CommandResultMap['rollback.restore']>>
+  listWorkflowTemplates: () => Promise<
+    IpcResponseEnvelope<QueryResultMap['workflow.template.list']>
+  >
+  createWorkflowTemplate: (
+    payload: WorkflowTemplateCreateRequest,
+  ) => Promise<IpcResponseEnvelope<CommandResultMap['workflow.template.create']>>
+  updateWorkflowTemplate: (
+    payload: WorkflowTemplateUpdateRequest,
+  ) => Promise<IpcResponseEnvelope<CommandResultMap['workflow.template.update']>>
+  deleteWorkflowTemplate: (
+    payload: WorkflowTemplateDeleteRequest,
+  ) => Promise<IpcResponseEnvelope<CommandResultMap['workflow.template.delete']>>
+  previewWorkflow: (
+    payload: WorkflowTemplatePreviewRequest,
+  ) => Promise<IpcResponseEnvelope<QueryResultMap['workflow.preview']>>
+  executeWorkflow: (
+    payload: WorkflowExecuteRequest,
+  ) => Promise<IpcResponseEnvelope<CommandResultMap['workflow.execute']>>
+  rerunWorkflow: (
+    payload: WorkflowRerunRequest,
+  ) => Promise<IpcResponseEnvelope<CommandResultMap['workflow.rerun']>>
+  listWorkflowExecutions: (
+    payload: WorkflowExecutionListRequest,
+  ) => Promise<IpcResponseEnvelope<QueryResultMap['workflow.execution.list']>>
+  getWorkflowExecution: (
+    payload: WorkflowExecutionGetRequest,
+  ) => Promise<IpcResponseEnvelope<QueryResultMap['workflow.execution.get']>>
+  listHistory: (
+    payload: HistoryQueryRequest,
+  ) => Promise<IpcResponseEnvelope<QueryResultMap['history.list']>>
+  getObservabilityDashboard: (
+    payload: ObservabilityDashboardRequest,
+  ) => Promise<IpcResponseEnvelope<QueryResultMap['observability.dashboard']>>
+  listAlerts: (
+    payload: AlertListRequest,
+  ) => Promise<IpcResponseEnvelope<QueryResultMap['alert.list']>>
+  markAlertRead: (
+    payload: AlertMarkReadRequest,
+  ) => Promise<IpcResponseEnvelope<CommandResultMap['alert.markRead']>>
 }

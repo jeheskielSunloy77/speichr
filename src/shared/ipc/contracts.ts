@@ -1,4 +1,7 @@
 import type {
+  AlertEvent,
+  AlertListRequest,
+  AlertMarkReadRequest,
   ConnectionCapabilitiesRequest,
   ConnectionCreateRequest,
   ConnectionDeleteRequest,
@@ -7,6 +10,8 @@ import type {
   ConnectionTestRequest,
   ConnectionTestResult,
   ConnectionUpdateRequest,
+  HistoryEvent,
+  HistoryQueryRequest,
   KeyDeleteRequest,
   KeyGetRequest,
   KeyListRequest,
@@ -15,8 +20,24 @@ import type {
   KeySetRequest,
   KeyValueRecord,
   MutationResult,
+  ObservabilityDashboard,
+  ObservabilityDashboardRequest,
   OperationErrorCode,
   ProviderCapabilities,
+  RollbackRestoreRequest,
+  SnapshotListRequest,
+  SnapshotRecord,
+  WorkflowDryRunPreview,
+  WorkflowExecuteRequest,
+  WorkflowExecutionGetRequest,
+  WorkflowExecutionListRequest,
+  WorkflowExecutionRecord,
+  WorkflowRerunRequest,
+  WorkflowTemplate,
+  WorkflowTemplateCreateRequest,
+  WorkflowTemplateDeleteRequest,
+  WorkflowTemplatePreviewRequest,
+  WorkflowTemplateUpdateRequest,
 } from '../contracts/cache'
 
 export const IPC_COMMAND_CHANNEL = 'cachify:command'
@@ -29,6 +50,13 @@ export type CachifyCommand =
   | 'connection.test'
   | 'key.set'
   | 'key.delete'
+  | 'rollback.restore'
+  | 'workflow.template.create'
+  | 'workflow.template.update'
+  | 'workflow.template.delete'
+  | 'workflow.execute'
+  | 'workflow.rerun'
+  | 'alert.markRead'
 
 export type CachifyQuery =
   | 'connection.list'
@@ -37,6 +65,14 @@ export type CachifyQuery =
   | 'key.list'
   | 'key.search'
   | 'key.get'
+  | 'snapshot.list'
+  | 'workflow.template.list'
+  | 'workflow.preview'
+  | 'workflow.execution.list'
+  | 'workflow.execution.get'
+  | 'history.list'
+  | 'observability.dashboard'
+  | 'alert.list'
 
 export interface CommandPayloadMap {
   'connection.create': ConnectionCreateRequest
@@ -45,6 +81,13 @@ export interface CommandPayloadMap {
   'connection.test': ConnectionTestRequest
   'key.set': KeySetRequest
   'key.delete': KeyDeleteRequest
+  'rollback.restore': RollbackRestoreRequest
+  'workflow.template.create': WorkflowTemplateCreateRequest
+  'workflow.template.update': WorkflowTemplateUpdateRequest
+  'workflow.template.delete': WorkflowTemplateDeleteRequest
+  'workflow.execute': WorkflowExecuteRequest
+  'workflow.rerun': WorkflowRerunRequest
+  'alert.markRead': AlertMarkReadRequest
 }
 
 export interface QueryPayloadMap {
@@ -54,6 +97,14 @@ export interface QueryPayloadMap {
   'key.list': KeyListRequest
   'key.search': KeySearchRequest
   'key.get': KeyGetRequest
+  'snapshot.list': SnapshotListRequest
+  'workflow.template.list': Record<string, never>
+  'workflow.preview': WorkflowTemplatePreviewRequest
+  'workflow.execution.list': WorkflowExecutionListRequest
+  'workflow.execution.get': WorkflowExecutionGetRequest
+  'history.list': HistoryQueryRequest
+  'observability.dashboard': ObservabilityDashboardRequest
+  'alert.list': AlertListRequest
 }
 
 export interface CommandResultMap {
@@ -63,6 +114,13 @@ export interface CommandResultMap {
   'connection.test': ConnectionTestResult
   'key.set': MutationResult
   'key.delete': MutationResult
+  'rollback.restore': MutationResult
+  'workflow.template.create': WorkflowTemplate
+  'workflow.template.update': WorkflowTemplate
+  'workflow.template.delete': MutationResult
+  'workflow.execute': WorkflowExecutionRecord
+  'workflow.rerun': WorkflowExecutionRecord
+  'alert.markRead': MutationResult
 }
 
 export interface QueryResultMap {
@@ -72,6 +130,14 @@ export interface QueryResultMap {
   'key.list': KeyListResult
   'key.search': KeyListResult
   'key.get': KeyValueRecord
+  'snapshot.list': SnapshotRecord[]
+  'workflow.template.list': WorkflowTemplate[]
+  'workflow.preview': WorkflowDryRunPreview
+  'workflow.execution.list': WorkflowExecutionRecord[]
+  'workflow.execution.get': WorkflowExecutionRecord
+  'history.list': HistoryEvent[]
+  'observability.dashboard': ObservabilityDashboard
+  'alert.list': AlertEvent[]
 }
 
 export interface OperationError {

@@ -77,6 +77,18 @@ const handleCommand = async (
       return service.setKey(envelope.payload)
     case 'key.delete':
       return service.deleteKey(envelope.payload)
+    case 'rollback.restore':
+    case 'workflow.template.create':
+    case 'workflow.template.update':
+    case 'workflow.template.delete':
+    case 'workflow.execute':
+    case 'workflow.rerun':
+    case 'alert.markRead':
+      throw new OperationFailure(
+        'NOT_SUPPORTED',
+        `Command "${envelope.command}" is not available yet.`,
+        false,
+      )
     default:
       return assertNever(envelope)
   }
@@ -99,6 +111,19 @@ const handleQuery = async (
       return service.searchKeys(envelope.payload)
     case 'key.get':
       return service.getKey(envelope.payload)
+    case 'snapshot.list':
+    case 'workflow.template.list':
+    case 'workflow.preview':
+    case 'workflow.execution.list':
+    case 'workflow.execution.get':
+    case 'history.list':
+    case 'observability.dashboard':
+    case 'alert.list':
+      throw new OperationFailure(
+        'NOT_SUPPORTED',
+        `Query "${envelope.query}" is not available yet.`,
+        false,
+      )
     default:
       return assertNever(envelope)
   }

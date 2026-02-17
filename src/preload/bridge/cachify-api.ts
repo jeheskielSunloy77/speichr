@@ -64,4 +64,25 @@ export const cachifyApi: CachifyApi = {
   getKey: (payload) => invokeQuery('key.get', payload),
   setKey: (payload) => invokeCommand('key.set', payload),
   deleteKey: (payload) => invokeCommand('key.delete', payload),
+  listSnapshots: (payload) => invokeQuery('snapshot.list', payload),
+  restoreSnapshot: (payload) => invokeCommand('rollback.restore', payload),
+  listWorkflowTemplates: () => invokeQuery('workflow.template.list', {}),
+  createWorkflowTemplate: (payload) =>
+    invokeCommand('workflow.template.create', payload),
+  updateWorkflowTemplate: (payload) =>
+    invokeCommand('workflow.template.update', payload),
+  deleteWorkflowTemplate: (payload) =>
+    invokeCommand('workflow.template.delete', payload),
+  previewWorkflow: (payload) => invokeQuery('workflow.preview', payload),
+  executeWorkflow: (payload) => invokeCommand('workflow.execute', payload),
+  rerunWorkflow: (payload) => invokeCommand('workflow.rerun', payload),
+  listWorkflowExecutions: (payload) =>
+    invokeQuery('workflow.execution.list', payload),
+  getWorkflowExecution: (payload) =>
+    invokeQuery('workflow.execution.get', payload),
+  listHistory: (payload) => invokeQuery('history.list', payload),
+  getObservabilityDashboard: (payload) =>
+    invokeQuery('observability.dashboard', payload),
+  listAlerts: (payload) => invokeQuery('alert.list', payload),
+  markAlertRead: (payload) => invokeCommand('alert.markRead', payload),
 }
