@@ -35,6 +35,8 @@ type WorkflowPanelProps = {
   connection: ConnectionProfile
 }
 
+const PREVIEW_PAGE_SIZE = 100
+
 const createEmptyTemplate = (): WorkflowTemplateDraft => ({
   name: 'Custom Workflow',
   kind: 'deleteByPattern',
@@ -166,6 +168,21 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
     templateName,
   ])
 
+  const buildTemplateSource = React.useCallback(() => {
+    const draft = buildTemplateDraft()
+
+    if (selectedTemplateId && selectedTemplateId !== 'inline') {
+      return {
+        templateId: selectedTemplateId,
+        parameterOverrides: draft.parameters,
+      }
+    }
+
+    return {
+      template: draft,
+    }
+  }, [buildTemplateDraft, selectedTemplateId])
+
   const saveTemplateMutation = useMutation({
     mutationFn: async () => {
       const template = buildTemplateDraft()
@@ -219,11 +236,13 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
   })
 
   const previewMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (args?: { cursor?: string }) => {
       return unwrapResponse(
         await window.cachify.previewWorkflow({
           connectionId: connection.id,
-          template: buildTemplateDraft(),
+          ...buildTemplateSource(),
+          cursor: args?.cursor,
+          limit: PREVIEW_PAGE_SIZE,
         }),
       )
     },
@@ -241,7 +260,7 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
       return unwrapResponse(
         await window.cachify.executeWorkflow({
           connectionId: connection.id,
-          template: buildTemplateDraft(),
+          ...buildTemplateSource(),
           dryRun,
           guardrailConfirmed: prodGuardrailConfirmed,
           retryPolicy: {
@@ -482,7 +501,7 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
             </Button>
             <Button
               variant='outline'
-              onClick={() => previewMutation.mutate()}
+              onClick={() => previewMutation.mutate({ cursor: undefined })}
               disabled={isBusy}
             >
               Preview
@@ -521,8 +540,12 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
               <>
                 <div className='flex items-center gap-2 text-xs'>
                   <Badge variant='outline'>{preview.kind}</Badge>
-                  <Badge variant='outline'>items: {preview.estimatedCount}</Badge>
+                  <Badge variant='outline'>estimate: {preview.estimatedCount}</Badge>
+                  <Badge variant='outline'>page: {preview.items.length}</Badge>
                   {preview.truncated && <Badge variant='destructive'>truncated</Badge>}
+                  {preview.nextCursor && (
+                    <Badge variant='outline'>cursor: {preview.nextCursor}</Badge>
+                  )}
                 </div>
 
                 <div className='max-h-56 overflow-auto border'>
@@ -551,6 +574,20 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
                     </TableBody>
                   </Table>
                 </div>
+                {preview.nextCursor && (
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    onClick={() =>
+                      previewMutation.mutate({
+                        cursor: preview.nextCursor,
+                      })
+                    }
+                    disabled={previewMutation.isPending}
+                  >
+                    Load Next Preview Page
+                  </Button>
+                )}
               </>
             )}
           </CardContent>

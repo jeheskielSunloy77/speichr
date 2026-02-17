@@ -53,6 +53,8 @@ import type {
   AlertRepository,
   CacheGateway,
   ConnectionRepository,
+  EngineEventIngestor,
+  EngineTimelineEventInput,
   HistoryRepository,
   MemcachedKeyIndexRepository,
   NotificationPublisher,
@@ -102,6 +104,7 @@ type ServiceDependencies = {
   observabilityRepository: ObservabilityRepository
   alertRepository: AlertRepository
   notificationPublisher: NotificationPublisher
+  engineEventIngestor: EngineEventIngestor
 }
 
 const BUILTIN_WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
@@ -331,6 +334,18 @@ class NoopNotificationPublisher implements NotificationPublisher {
   }
 }
 
+class NoopEngineEventIngestor implements EngineEventIngestor {
+  public async start(args: {
+    onEvent: (event: EngineTimelineEventInput) => Promise<void>
+  }): Promise<void> {
+    void args
+  }
+
+  public async stop(): Promise<void> {
+    return Promise.resolve()
+  }
+}
+
 export class CachifyService {
   private readonly snapshotRepository: SnapshotRepository
 
@@ -345,6 +360,8 @@ export class CachifyService {
   private readonly alertRepository: AlertRepository
 
   private readonly notificationPublisher: NotificationPublisher
+
+  private readonly engineEventIngestor: EngineEventIngestor
 
   private readonly operationSamples = new Map<
     string,
@@ -375,6 +392,20 @@ export class CachifyService {
       dependencies?.alertRepository ?? new InMemoryAlertRepository()
     this.notificationPublisher =
       dependencies?.notificationPublisher ?? new NoopNotificationPublisher()
+    this.engineEventIngestor =
+      dependencies?.engineEventIngestor ?? new NoopEngineEventIngestor()
+  }
+
+  public async startEngineEventIngestion(): Promise<void> {
+    await this.engineEventIngestor.start({
+      onEvent: async (event) => {
+        await this.ingestEngineEvent(event)
+      },
+    })
+  }
+
+  public async stopEngineEventIngestion(): Promise<void> {
+    await this.engineEventIngestor.stop()
   }
 
   public async listConnections(): Promise<ConnectionProfile[]> {
@@ -664,7 +695,11 @@ export class CachifyService {
           key: payload.key,
         })
 
-    if (!snapshot || snapshot.connectionId !== payload.connectionId) {
+    if (
+      !snapshot ||
+      snapshot.connectionId !== payload.connectionId ||
+      snapshot.key !== payload.key
+    ) {
       throw new OperationFailure(
         'VALIDATION_ERROR',
         'No rollback snapshot was found for this key.',
@@ -795,7 +830,10 @@ export class CachifyService {
       parameterOverrides: payload.parameterOverrides,
     })
 
-    return this.buildWorkflowPreview(profile, secret, template.kind, parameters)
+    return this.buildWorkflowPreview(profile, secret, template.kind, parameters, {
+      cursor: payload.cursor,
+      limit: payload.limit,
+    })
   }
 
   public async executeWorkflow(
@@ -845,6 +883,9 @@ export class CachifyService {
       secret,
       template.kind,
       parameters,
+      {
+        limit: 500,
+      },
     )
 
     if (payload.dryRun) {
@@ -1050,6 +1091,50 @@ export class CachifyService {
 
   public async listHistory(payload: HistoryQueryRequest): Promise<HistoryEvent[]> {
     return this.historyRepository.query(payload)
+  }
+
+  public async ingestEngineEvent(payload: EngineTimelineEventInput): Promise<void> {
+    const profile = await this.connectionRepository.findById(payload.connectionId)
+    if (!profile) {
+      return
+    }
+
+    const event: HistoryEvent = {
+      id: uuidv4(),
+      timestamp: payload.timestamp ?? new Date().toISOString(),
+      source: 'engine',
+      connectionId: payload.connectionId,
+      environment: payload.environment ?? profile.environment,
+      action: payload.action,
+      keyOrPattern: payload.keyOrPattern,
+      durationMs: Math.max(0, Math.round(payload.durationMs ?? 0)),
+      status: payload.status,
+      errorCode: payload.errorCode,
+      retryable: payload.retryable,
+      details: payload.details,
+    }
+
+    await this.historyRepository.append(event)
+
+    if (event.status === 'error') {
+      await this.emitAlert({
+        connectionId: event.connectionId,
+        environment: event.environment,
+        severity: 'warning',
+        title: 'Engine event error',
+        message: `${event.action} failed on ${event.keyOrPattern}.`,
+        source: 'observability',
+      })
+    } else if (event.durationMs >= SLOW_OPERATION_THRESHOLD_MS) {
+      await this.emitAlert({
+        connectionId: event.connectionId,
+        environment: event.environment,
+        severity: 'info',
+        title: 'Slow engine event detected',
+        message: `${event.action} took ${event.durationMs}ms.`,
+        source: 'observability',
+      })
+    }
   }
 
   public async getObservabilityDashboard(
@@ -1697,15 +1782,28 @@ export class CachifyService {
     secret: ConnectionSecret,
     kind: WorkflowTemplate['kind'],
     parameters: Record<string, unknown>,
+    options?: {
+      cursor?: string
+      limit?: number
+    },
   ): Promise<WorkflowDryRunPreview> {
+    const previewLimit = clampInteger(options?.limit, 1, 500, 100)
+
     if (kind === 'warmupSet') {
       const entries = parseWarmupEntries(parameters)
+      const startIndex = clampInteger(options?.cursor ? Number(options.cursor) : 0, 0, entries.length, 0)
+      const pageEntries = entries.slice(startIndex, startIndex + previewLimit)
+      const nextCursor =
+        startIndex + previewLimit < entries.length
+          ? String(startIndex + previewLimit)
+          : undefined
 
       return {
         kind,
         estimatedCount: entries.length,
-        truncated: false,
-        items: entries.map((entry) => ({
+        truncated: Boolean(nextCursor),
+        nextCursor,
+        items: pageEntries.map((entry) => ({
           key: entry.key,
           action: 'setValue',
           valuePreview: entry.value,
@@ -1715,11 +1813,13 @@ export class CachifyService {
     }
 
     const pattern = getString(parameters.pattern, '*')
-    const limit = clampInteger(parameters.limit, 1, 500, 100)
+    const templateLimit = clampInteger(parameters.limit, 1, 500, 100)
+    const searchLimit = clampInteger(options?.limit, 1, 500, templateLimit)
 
     const searchResult = await this.cacheGateway.searchKeys(profile, secret, {
       pattern,
-      limit,
+      cursor: options?.cursor,
+      limit: searchLimit,
     })
 
     const items: WorkflowDryRunPreviewItem[] = []
@@ -1749,6 +1849,7 @@ export class CachifyService {
       kind,
       estimatedCount: items.length,
       truncated: Boolean(searchResult.nextCursor),
+      nextCursor: searchResult.nextCursor,
       items,
     }
   }

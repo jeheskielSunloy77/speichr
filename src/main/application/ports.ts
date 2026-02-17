@@ -10,6 +10,7 @@ import type {
   KeyListResult,
   KeyValueRecord,
   ObservabilitySnapshot,
+  OperationErrorCode,
   ProviderCapabilities,
   SnapshotRecord,
   WorkflowExecutionListRequest,
@@ -93,6 +94,26 @@ export interface AlertRepository {
 
 export interface NotificationPublisher {
   notify: (alert: Pick<AlertEvent, 'title' | 'message'>) => Promise<void>
+}
+
+export interface EngineTimelineEventInput {
+  timestamp?: string
+  connectionId: string
+  environment?: ConnectionProfile['environment']
+  action: string
+  keyOrPattern: string
+  durationMs?: number
+  status: 'success' | 'error' | 'blocked'
+  errorCode?: OperationErrorCode
+  retryable?: boolean
+  details?: Record<string, unknown>
+}
+
+export interface EngineEventIngestor {
+  start: (args: {
+    onEvent: (event: EngineTimelineEventInput) => Promise<void>
+  }) => Promise<void>
+  stop: () => Promise<void>
 }
 
 export interface CacheGateway {

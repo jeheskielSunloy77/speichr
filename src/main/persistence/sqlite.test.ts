@@ -299,5 +299,12 @@ describeSqlite('sqlite persistence v2', () => {
     })
 
     expect(unreadAfterMark).toHaveLength(0)
+
+    const allAlerts = await alertRepository.list({
+      unreadOnly: false,
+      limit: 10,
+    })
+
+    expect(allAlerts).toHaveLength(1)
   })
 })

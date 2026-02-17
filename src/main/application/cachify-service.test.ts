@@ -12,6 +12,7 @@ import { CachifyService } from './cachify-service'
 import type {
   CacheGateway,
   ConnectionRepository,
+  EngineEventIngestor,
   MemcachedKeyIndexRepository,
   SecretStore,
 } from './ports'
@@ -507,6 +508,70 @@ describe('CachifyService', () => {
     )
   })
 
+  it('rejects rollback snapshot IDs that do not match requested key', async () => {
+    const repository = new InMemoryConnectionRepository()
+    const secretStore = new InMemorySecretStore()
+    const memcachedIndex = new InMemoryMemcachedIndexRepository()
+    const getValueMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        key: 'user:2',
+        value: 'old-value',
+        ttlSeconds: 30,
+        supportsTTL: true,
+      })
+      .mockResolvedValueOnce({
+        key: 'user:1',
+        value: 'other-value',
+        ttlSeconds: 60,
+        supportsTTL: true,
+      })
+    const gateway = createGatewayMock({
+      getValue: getValueMock,
+    })
+
+    const profile: ConnectionProfile = {
+      ...createStoredProfile(),
+      id: 'rollback-key-mismatch-1',
+      secretRef: 'rollback-key-mismatch-1',
+    }
+
+    await repository.save(profile)
+    await secretStore.saveSecret(profile.id, { password: 'secret' })
+
+    const service = new CachifyService(
+      repository,
+      secretStore,
+      memcachedIndex,
+      gateway,
+    )
+
+    await service.setKey({
+      connectionId: profile.id,
+      key: 'user:2',
+      value: 'updated-value',
+      ttlSeconds: 15,
+    })
+
+    const snapshots = await service.listSnapshots({
+      connectionId: profile.id,
+      key: 'user:2',
+      limit: 1,
+    })
+
+    await expect(
+      service.restoreSnapshot({
+        connectionId: profile.id,
+        key: 'user:1',
+        snapshotId: snapshots[0].id,
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: 'VALIDATION_ERROR',
+      }),
+    )
+  })
+
   it('executes workflow dry-runs without mutating keys and stores execution records', async () => {
     const repository = new InMemoryConnectionRepository()
     const secretStore = new InMemorySecretStore()
@@ -599,5 +664,86 @@ describe('CachifyService', () => {
     const alerts = await service.listAlerts({ limit: 20, unreadOnly: false })
     expect(alerts.length).toBeGreaterThan(0)
     expect(alerts[0].source).toBe('policy')
+  })
+
+  it('records ingested engine events in history timeline', async () => {
+    const repository = new InMemoryConnectionRepository()
+    const secretStore = new InMemorySecretStore()
+    const memcachedIndex = new InMemoryMemcachedIndexRepository()
+    const gateway = createGatewayMock()
+
+    const profile: ConnectionProfile = {
+      ...createStoredProfile(),
+      id: 'engine-event-1',
+      secretRef: 'engine-event-1',
+    }
+
+    await repository.save(profile)
+    await secretStore.saveSecret(profile.id, { password: 'secret' })
+
+    const service = new CachifyService(
+      repository,
+      secretStore,
+      memcachedIndex,
+      gateway,
+    )
+
+    await service.ingestEngineEvent({
+      connectionId: profile.id,
+      action: 'engine.slowlog',
+      keyOrPattern: 'session:*',
+      durationMs: 900,
+      status: 'success',
+    })
+
+    const history = await service.listHistory({
+      connectionId: profile.id,
+      limit: 10,
+    })
+
+    expect(history[0].source).toBe('engine')
+    expect(history[0].action).toBe('engine.slowlog')
+  })
+
+  it('starts and stops the configured engine event ingestor', async () => {
+    const repository = new InMemoryConnectionRepository()
+    const secretStore = new InMemorySecretStore()
+    const memcachedIndex = new InMemoryMemcachedIndexRepository()
+    const gateway = createGatewayMock()
+
+    const profile: ConnectionProfile = {
+      ...createStoredProfile(),
+      id: 'engine-event-2',
+      secretRef: 'engine-event-2',
+    }
+
+    await repository.save(profile)
+    await secretStore.saveSecret(profile.id, { password: 'secret' })
+
+    const startMock = vi.fn(async (args: { onEvent: (event: unknown) => Promise<void> }) => {
+      void args
+      return undefined
+    })
+    const stopMock = vi.fn(async () => undefined)
+    const ingestor: EngineEventIngestor = {
+      start: startMock,
+      stop: stopMock,
+    }
+
+    const service = new CachifyService(
+      repository,
+      secretStore,
+      memcachedIndex,
+      gateway,
+      {
+        engineEventIngestor: ingestor,
+      },
+    )
+
+    await service.startEngineEventIngestion()
+    await service.stopEngineEventIngestion()
+
+    expect(startMock).toHaveBeenCalledTimes(1)
+    expect(stopMock).toHaveBeenCalledTimes(1)
   })
 })

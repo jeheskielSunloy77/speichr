@@ -1416,7 +1416,7 @@ export class SqliteAlertRepository implements AlertRepository {
   }
 
   public async list(request: AlertListRequest): Promise<AlertEvent[]> {
-    const readFilter = request.unreadOnly === undefined ? null : request.unreadOnly ? 0 : 1
+    const readFilter = request.unreadOnly ? 0 : null
     const rows = this.listStatement.all(readFilter, readFilter, request.limit)
 
     return rows.map(rowToAlert)

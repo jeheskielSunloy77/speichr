@@ -163,6 +163,23 @@ describe('queryEnvelopeSchema', () => {
     expect(parsed.query).toBe('workflow.preview')
   })
 
+  it('accepts workflow preview pagination fields', () => {
+    const parsed = queryEnvelopeSchema.parse({
+      query: 'workflow.preview',
+      correlationId: 'xyz-3b',
+      payload: {
+        connectionId: 'conn-1',
+        templateId: 'template-1',
+        cursor: '20',
+        limit: 50,
+      },
+    })
+
+    expect(parsed.query).toBe('workflow.preview')
+    expect((parsed.payload as { cursor?: string }).cursor).toBe('20')
+    expect((parsed.payload as { limit?: number }).limit).toBe(50)
+  })
+
   it('accepts alert list queries', () => {
     const parsed = queryEnvelopeSchema.parse({
       query: 'alert.list',

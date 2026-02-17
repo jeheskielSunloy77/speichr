@@ -7,6 +7,7 @@ import type BetterSqlite3 from 'better-sqlite3'
 import { CachifyService } from './application/cachify-service'
 import { DesktopNotificationPublisher } from './infrastructure/notifications/desktop-notification-publisher'
 import { DefaultCacheGateway } from './infrastructure/providers/cache-gateway'
+import { ProviderEngineEventIngestor } from './infrastructure/providers/provider-engine-event-ingestor'
 import { InMemorySecretStore } from './infrastructure/secrets/in-memory-secret-store'
 import { KeytarSecretStore } from './infrastructure/secrets/keytar-secret-store'
 import { registerIpcHandlers } from './interface-adapters/ipc'
@@ -56,6 +57,10 @@ const initializeRuntime = (): RuntimeContext => {
       : new KeytarSecretStore()
 
   const cacheGateway = new DefaultCacheGateway(memcachedKeyIndexRepository)
+  const engineEventIngestor = new ProviderEngineEventIngestor(
+    connectionRepository,
+    cacheGateway,
+  )
   const notificationPublisher = new DesktopNotificationPublisher()
 
   const service = new CachifyService(
@@ -71,6 +76,7 @@ const initializeRuntime = (): RuntimeContext => {
       observabilityRepository,
       alertRepository,
       notificationPublisher,
+      engineEventIngestor,
     },
   )
 
@@ -110,8 +116,11 @@ const createMainWindow = (): BrowserWindow => {
   return mainWindow
 }
 
-app.whenReady().then(() => {
-  initializeRuntime()
+app.whenReady().then(async () => {
+  const context = initializeRuntime()
+  await context.service.startEngineEventIngestion().catch((error: unknown): void => {
+    void error
+  })
   createMainWindow()
 
   app.on('activate', () => {
@@ -128,6 +137,9 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  void runtime?.service.stopEngineEventIngestion().catch((error: unknown): void => {
+    void error
+  })
   runtime?.db.close()
   runtime = null
 })

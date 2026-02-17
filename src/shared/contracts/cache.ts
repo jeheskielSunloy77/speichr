@@ -217,6 +217,8 @@ export interface WorkflowTemplatePreviewRequest {
   templateId?: string
   template?: WorkflowTemplateDraft
   parameterOverrides?: Record<string, unknown>
+  cursor?: string
+  limit?: number
 }
 
 export interface WorkflowStepRetryPolicy {
@@ -238,6 +240,7 @@ export interface WorkflowDryRunPreview {
   kind: WorkflowKind
   estimatedCount: number
   truncated: boolean
+  nextCursor?: string
   items: WorkflowDryRunPreviewItem[]
 }
 

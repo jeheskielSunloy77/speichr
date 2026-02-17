@@ -12,9 +12,20 @@
 		"publish": "electron-forge publish",
 		"lint": "eslint --ext .ts,.tsx .",
 		"typecheck": "tsc --noEmit",
-		"test": "vitest run",
+		"check:boundaries": "bun run scripts/ci/check-import-boundaries.ts",
+		"check:migrations": "bun run scripts/ci/check-migration-integrity.ts",
+		"test": "bun run test:unit && bun run test:contract",
+		"test:unit": "vitest run src/main/application/cachify-service.test.ts src/main/policies/read-only-policy.test.ts",
+		"test:contract": "vitest run src/shared/schemas/ipc.test.ts src/renderer/features/common/ipc.test.ts",
+		"test:provider": "vitest run src/main/infrastructure/providers/cache-gateway.test.ts src/main/infrastructure/providers/provider-engine-event-ingestor.test.ts",
+		"test:migration": "vitest run src/main/persistence/sqlite.test.ts",
+		"test:integration": "vitest run src/integration",
+		"test:smoke": "vitest run src/smoke",
 		"test:watch": "vitest",
-		"test:all": "vitest run --coverage"
+		"test:all": "bun run test && bun run test:provider && bun run test:migration && bun run test:integration && bun run test:smoke",
+		"ci:pr": "bun run typecheck && bun run lint && bun run check:boundaries && bun run test && bun run test:provider && bun run check:migrations && bun run test:migration",
+		"ci:main": "bun run ci:pr && bun run test:integration && bun run test:smoke",
+		"ci:nightly": "bun run ci:main"
 	},
 	"keywords": [],
 	"author": {

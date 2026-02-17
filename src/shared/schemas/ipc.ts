@@ -189,6 +189,8 @@ const workflowPreviewPayloadSchema = z
     templateId: idSchema.optional(),
     template: workflowTemplateDraftSchema.optional(),
     parameterOverrides: z.record(z.string(), z.unknown()).optional(),
+    cursor: z.string().optional(),
+    limit: z.number().int().min(1).max(500).optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
