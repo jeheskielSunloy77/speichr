@@ -118,6 +118,50 @@ describe('commandEnvelopeSchema', () => {
       'conn-1',
     )
   })
+
+  it('accepts incident bundle export payloads', () => {
+    const parsed = commandEnvelopeSchema.parse({
+      command: 'incident.bundle.export',
+      correlationId: 'incident-1',
+      payload: {
+        from: '2026-02-17T00:00:00.000Z',
+        to: '2026-02-17T01:00:00.000Z',
+        includes: ['timeline', 'diagnostics', 'metrics'],
+        redactionProfile: 'strict',
+        destinationPath: '/tmp/incident.json',
+      },
+    })
+
+    expect(parsed.command).toBe('incident.bundle.export')
+  })
+
+  it('rejects governance policy packs with invalid execution windows', () => {
+    expect(() =>
+      commandEnvelopeSchema.parse({
+        command: 'policy.pack.create',
+        correlationId: 'policy-1',
+        payload: {
+          policyPack: {
+            name: 'Night Window',
+            environments: ['prod'],
+            maxWorkflowItems: 500,
+            maxRetryAttempts: 3,
+            schedulingEnabled: true,
+            executionWindows: [
+              {
+                id: 'window-1',
+                weekdays: ['mon'],
+                startTime: '24:00',
+                endTime: '01:00',
+                timezone: 'UTC',
+              },
+            ],
+            enabled: true,
+          },
+        },
+      }),
+    ).toThrowError()
+  })
 })
 
 describe('queryEnvelopeSchema', () => {
@@ -191,5 +235,35 @@ describe('queryEnvelopeSchema', () => {
     })
 
     expect(parsed.query).toBe('alert.list')
+  })
+
+  it('accepts compare period queries', () => {
+    const parsed = queryEnvelopeSchema.parse({
+      query: 'observability.comparePeriods',
+      correlationId: 'cmp-1',
+      payload: {
+        baselineFrom: '2026-02-10T00:00:00.000Z',
+        baselineTo: '2026-02-10T23:59:59.999Z',
+        compareFrom: '2026-02-17T00:00:00.000Z',
+        compareTo: '2026-02-17T23:59:59.999Z',
+      },
+    })
+
+    expect(parsed.query).toBe('observability.comparePeriods')
+  })
+
+  it('accepts incident bundle preview queries', () => {
+    const parsed = queryEnvelopeSchema.parse({
+      query: 'incident.bundle.preview',
+      correlationId: 'incident-preview',
+      payload: {
+        from: '2026-02-17T00:00:00.000Z',
+        to: '2026-02-17T01:00:00.000Z',
+        includes: ['timeline', 'logs'],
+        redactionProfile: 'default',
+      },
+    })
+
+    expect(parsed.query).toBe('incident.bundle.preview')
   })
 })

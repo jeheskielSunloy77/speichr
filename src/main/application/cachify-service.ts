@@ -6,6 +6,13 @@ import type {
   AlertEvent,
   AlertListRequest,
   AlertMarkReadRequest,
+  AlertRule,
+  AlertRuleCreateRequest,
+  AlertRuleDeleteRequest,
+  AlertRuleUpdateRequest,
+  CompareMetricDelta,
+  ComparePeriodsRequest,
+  ComparePeriodsResult,
   ConnectionCapabilitiesRequest,
   ConnectionCreateRequest,
   ConnectionDeleteRequest,
@@ -14,10 +21,29 @@ import type {
   ConnectionSecret,
   ConnectionTestRequest,
   ConnectionUpdateRequest,
+  FailedOperationDiagnostic,
+  FailedOperationDrilldownRequest,
+  FailedOperationDrilldownResult,
+  GovernanceAssignment,
+  GovernanceAssignmentListRequest,
+  GovernanceAssignmentRequest,
+  GovernancePolicyPack,
+  GovernancePolicyPackCreateRequest,
+  GovernancePolicyPackDeleteRequest,
+  GovernancePolicyPackUpdateRequest,
   HistoryEvent,
   HistoryQueryRequest,
+  IncidentBundle,
+  IncidentBundleExportRequest,
+  IncidentBundleListRequest,
+  IncidentBundlePreview,
+  IncidentBundlePreviewRequest,
   KeyDeleteRequest,
   KeyGetRequest,
+  KeyspaceActivityPattern,
+  KeyspaceActivityPoint,
+  KeyspaceActivityRequest,
+  KeyspaceActivityView,
   KeyListRequest,
   KeyListResult,
   KeySearchRequest,
@@ -28,15 +54,22 @@ import type {
   ObservabilityDashboardRequest,
   ObservabilitySnapshot,
   ProviderCapabilities,
+  RetentionPolicy,
+  RetentionPolicyListResult,
+  RetentionPolicyUpdateRequest,
+  RetentionPurgeRequest,
+  RetentionPurgeResult,
   RollbackRestoreRequest,
   SnapshotListRequest,
   SnapshotRecord,
+  StorageSummary,
   WorkflowDryRunPreview,
   WorkflowDryRunPreviewItem,
   WorkflowExecuteRequest,
   WorkflowExecutionGetRequest,
   WorkflowExecutionListRequest,
   WorkflowExecutionRecord,
+  WorkflowResumeRequest,
   WorkflowRerunRequest,
   WorkflowStepResult,
   WorkflowStepRetryPolicy,
@@ -1280,6 +1313,256 @@ export class CachifyService {
     }
   }
 
+  public async resumeWorkflow(
+    payload: WorkflowResumeRequest,
+  ): Promise<WorkflowExecutionRecord> {
+    const execution = await this.workflowExecutionRepository.findById(
+      payload.executionId,
+    )
+
+    if (!execution) {
+      throw new OperationFailure(
+        'VALIDATION_ERROR',
+        'Workflow execution record was not found.',
+        false,
+        { id: payload.executionId },
+      )
+    }
+
+    return this.rerunWorkflow({
+      executionId: payload.executionId,
+      guardrailConfirmed: payload.guardrailConfirmed,
+    })
+  }
+
+  public async getKeyspaceActivity(
+    payload: KeyspaceActivityRequest,
+  ): Promise<KeyspaceActivityView> {
+    const now = new Date().toISOString()
+
+    return {
+      generatedAt: now,
+      from: payload.from,
+      to: payload.to,
+      topPatterns: [],
+      distribution: [],
+    }
+  }
+
+  public async getFailedOperationDrilldown(
+    payload: FailedOperationDrilldownRequest,
+  ): Promise<FailedOperationDrilldownResult> {
+    void payload
+
+    return {
+      generatedAt: new Date().toISOString(),
+      diagnostics: [],
+    }
+  }
+
+  public async comparePeriods(
+    payload: ComparePeriodsRequest,
+  ): Promise<ComparePeriodsResult> {
+    void payload
+
+    const metrics: CompareMetricDelta[] = [
+      {
+        metric: 'operationCount',
+        baseline: 0,
+        compare: 0,
+        delta: 0,
+        deltaPercent: 0,
+        direction: 'unchanged',
+      },
+      {
+        metric: 'errorRate',
+        baseline: 0,
+        compare: 0,
+        delta: 0,
+        deltaPercent: 0,
+        direction: 'unchanged',
+      },
+      {
+        metric: 'latencyP95Ms',
+        baseline: 0,
+        compare: 0,
+        delta: 0,
+        deltaPercent: 0,
+        direction: 'unchanged',
+      },
+      {
+        metric: 'slowOpCount',
+        baseline: 0,
+        compare: 0,
+        delta: 0,
+        deltaPercent: 0,
+        direction: 'unchanged',
+      },
+    ]
+
+    return {
+      generatedAt: new Date().toISOString(),
+      baselineLabel: `${payload.baselineFrom} -> ${payload.baselineTo}`,
+      compareLabel: `${payload.compareFrom} -> ${payload.compareTo}`,
+      metrics,
+    }
+  }
+
+  public async previewIncidentBundle(
+    payload: IncidentBundlePreviewRequest,
+  ): Promise<IncidentBundlePreview> {
+    return {
+      from: payload.from,
+      to: payload.to,
+      connectionIds: payload.connectionIds ?? [],
+      includes: payload.includes,
+      redactionProfile: payload.redactionProfile,
+      timelineCount: 0,
+      logCount: 0,
+      diagnosticCount: 0,
+      metricCount: 0,
+      estimatedSizeBytes: 0,
+      checksumPreview: createHash('sha256')
+        .update(JSON.stringify(payload))
+        .digest('hex'),
+    }
+  }
+
+  public async listIncidentBundles(
+    payload: IncidentBundleListRequest,
+  ): Promise<IncidentBundle[]> {
+    void payload
+    return []
+  }
+
+  public async exportIncidentBundle(
+    payload: IncidentBundleExportRequest,
+  ): Promise<IncidentBundle> {
+    void payload
+    this.unsupportedV3('incident bundle export')
+  }
+
+  public async listAlertRules(): Promise<AlertRule[]> {
+    return []
+  }
+
+  public async createAlertRule(
+    payload: AlertRuleCreateRequest,
+  ): Promise<AlertRule> {
+    void payload
+    this.unsupportedV3('alert rule create')
+  }
+
+  public async updateAlertRule(
+    payload: AlertRuleUpdateRequest,
+  ): Promise<AlertRule> {
+    void payload
+    this.unsupportedV3('alert rule update')
+  }
+
+  public async deleteAlertRule(
+    payload: AlertRuleDeleteRequest,
+  ): Promise<MutationResult> {
+    void payload
+    this.unsupportedV3('alert rule delete')
+  }
+
+  public async listGovernancePolicyPacks(): Promise<GovernancePolicyPack[]> {
+    return []
+  }
+
+  public async createGovernancePolicyPack(
+    payload: GovernancePolicyPackCreateRequest,
+  ): Promise<GovernancePolicyPack> {
+    void payload
+    this.unsupportedV3('governance policy pack create')
+  }
+
+  public async updateGovernancePolicyPack(
+    payload: GovernancePolicyPackUpdateRequest,
+  ): Promise<GovernancePolicyPack> {
+    void payload
+    this.unsupportedV3('governance policy pack update')
+  }
+
+  public async deleteGovernancePolicyPack(
+    payload: GovernancePolicyPackDeleteRequest,
+  ): Promise<MutationResult> {
+    void payload
+    this.unsupportedV3('governance policy pack delete')
+  }
+
+  public async assignGovernancePolicyPack(
+    payload: GovernanceAssignmentRequest,
+  ): Promise<MutationResult> {
+    void payload
+    this.unsupportedV3('governance policy pack assignment')
+  }
+
+  public async listGovernanceAssignments(
+    payload: GovernanceAssignmentListRequest,
+  ): Promise<GovernanceAssignment[]> {
+    void payload
+    return []
+  }
+
+  public async listRetentionPolicies(): Promise<RetentionPolicyListResult> {
+    return {
+      policies: [
+        {
+          dataset: 'timelineEvents',
+          retentionDays: 30,
+          storageBudgetMb: 512,
+          autoPurgeOldest: true,
+        },
+        {
+          dataset: 'observabilitySnapshots',
+          retentionDays: 30,
+          storageBudgetMb: 512,
+          autoPurgeOldest: true,
+        },
+        {
+          dataset: 'workflowHistory',
+          retentionDays: 30,
+          storageBudgetMb: 512,
+          autoPurgeOldest: true,
+        },
+        {
+          dataset: 'incidentArtifacts',
+          retentionDays: 30,
+          storageBudgetMb: 512,
+          autoPurgeOldest: true,
+        },
+      ],
+    }
+  }
+
+  public async updateRetentionPolicy(
+    payload: RetentionPolicyUpdateRequest,
+  ): Promise<RetentionPolicy> {
+    return payload.policy
+  }
+
+  public async purgeRetentionData(
+    payload: RetentionPurgeRequest,
+  ): Promise<RetentionPurgeResult> {
+    return {
+      dataset: payload.dataset,
+      cutoff: payload.olderThan ?? new Date().toISOString(),
+      dryRun: Boolean(payload.dryRun),
+      deletedRows: 0,
+      freedBytes: 0,
+    }
+  }
+
+  public async getStorageSummary(): Promise<StorageSummary> {
+    return {
+      generatedAt: new Date().toISOString(),
+      datasets: [],
+      totalBytes: 0,
+    }
+  }
+
   private async requireConnection(id: string): Promise<ConnectionProfile> {
     const profile = await this.connectionRepository.findById(id)
 
@@ -1710,6 +1993,14 @@ export class CachifyService {
       title: event.title,
       message: event.message,
     })
+  }
+
+  private unsupportedV3(feature: string): never {
+    throw new OperationFailure(
+      'NOT_SUPPORTED',
+      `V3 capability not implemented yet: ${feature}.`,
+      false,
+    )
   }
 
   private async resolveWorkflowTemplate(args: {

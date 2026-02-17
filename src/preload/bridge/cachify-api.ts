@@ -76,6 +76,7 @@ export const cachifyApi: CachifyApi = {
   previewWorkflow: (payload) => invokeQuery('workflow.preview', payload),
   executeWorkflow: (payload) => invokeCommand('workflow.execute', payload),
   rerunWorkflow: (payload) => invokeCommand('workflow.rerun', payload),
+  resumeWorkflow: (payload) => invokeCommand('workflow.resume', payload),
   listWorkflowExecutions: (payload) =>
     invokeQuery('workflow.execution.list', payload),
   getWorkflowExecution: (payload) =>
@@ -83,6 +84,34 @@ export const cachifyApi: CachifyApi = {
   listHistory: (payload) => invokeQuery('history.list', payload),
   getObservabilityDashboard: (payload) =>
     invokeQuery('observability.dashboard', payload),
+  getKeyspaceActivity: (payload) =>
+    invokeQuery('observability.keyspaceActivity', payload),
+  getFailedOperationDrilldown: (payload) =>
+    invokeQuery('observability.failedOperations', payload),
+  comparePeriods: (payload) =>
+    invokeQuery('observability.comparePeriods', payload),
+  previewIncidentBundle: (payload) =>
+    invokeQuery('incident.bundle.preview', payload),
+  listIncidentBundles: (payload) =>
+    invokeQuery('incident.bundle.list', payload),
+  exportIncidentBundle: (payload) =>
+    invokeCommand('incident.bundle.export', payload),
   listAlerts: (payload) => invokeQuery('alert.list', payload),
   markAlertRead: (payload) => invokeCommand('alert.markRead', payload),
+  listAlertRules: () => invokeQuery('alert.rule.list', {}),
+  createAlertRule: (payload) => invokeCommand('alert.rule.create', payload),
+  updateAlertRule: (payload) => invokeCommand('alert.rule.update', payload),
+  deleteAlertRule: (payload) => invokeCommand('alert.rule.delete', payload),
+  listPolicyPacks: () => invokeQuery('policy.pack.list', {}),
+  createPolicyPack: (payload) => invokeCommand('policy.pack.create', payload),
+  updatePolicyPack: (payload) => invokeCommand('policy.pack.update', payload),
+  deletePolicyPack: (payload) => invokeCommand('policy.pack.delete', payload),
+  assignPolicyPack: (payload) => invokeCommand('policy.pack.assign', payload),
+  listPolicyPackAssignments: (payload) =>
+    invokeQuery('policy.pack.assignment.list', payload),
+  listRetentionPolicies: () => invokeQuery('retention.policy.list', {}),
+  updateRetentionPolicy: (payload) =>
+    invokeCommand('retention.policy.update', payload),
+  purgeRetentionData: (payload) => invokeCommand('retention.purge', payload),
+  getStorageSummary: () => invokeQuery('storage.summary', {}),
 }

@@ -2,6 +2,12 @@ import type {
   AlertEvent,
   AlertListRequest,
   AlertMarkReadRequest,
+  AlertRule,
+  AlertRuleCreateRequest,
+  AlertRuleDeleteRequest,
+  AlertRuleUpdateRequest,
+  ComparePeriodsRequest,
+  ComparePeriodsResult,
   ConnectionCapabilitiesRequest,
   ConnectionCreateRequest,
   ConnectionDeleteRequest,
@@ -10,10 +16,26 @@ import type {
   ConnectionTestRequest,
   ConnectionTestResult,
   ConnectionUpdateRequest,
+  FailedOperationDrilldownRequest,
+  FailedOperationDrilldownResult,
+  GovernanceAssignment,
+  GovernanceAssignmentListRequest,
+  GovernanceAssignmentRequest,
+  GovernancePolicyPack,
+  GovernancePolicyPackCreateRequest,
+  GovernancePolicyPackDeleteRequest,
+  GovernancePolicyPackUpdateRequest,
   HistoryEvent,
   HistoryQueryRequest,
+  IncidentBundle,
+  IncidentBundleExportRequest,
+  IncidentBundleListRequest,
+  IncidentBundlePreview,
+  IncidentBundlePreviewRequest,
   KeyDeleteRequest,
   KeyGetRequest,
+  KeyspaceActivityRequest,
+  KeyspaceActivityView,
   KeyListRequest,
   KeyListResult,
   KeySearchRequest,
@@ -24,14 +46,21 @@ import type {
   ObservabilityDashboardRequest,
   OperationErrorCode,
   ProviderCapabilities,
+  RetentionPolicy,
+  RetentionPolicyListResult,
+  RetentionPolicyUpdateRequest,
+  RetentionPurgeRequest,
+  RetentionPurgeResult,
   RollbackRestoreRequest,
   SnapshotListRequest,
   SnapshotRecord,
+  StorageSummary,
   WorkflowDryRunPreview,
   WorkflowExecuteRequest,
   WorkflowExecutionGetRequest,
   WorkflowExecutionListRequest,
   WorkflowExecutionRecord,
+  WorkflowResumeRequest,
   WorkflowRerunRequest,
   WorkflowTemplate,
   WorkflowTemplateCreateRequest,
@@ -56,7 +85,18 @@ export type CachifyCommand =
   | 'workflow.template.delete'
   | 'workflow.execute'
   | 'workflow.rerun'
+  | 'workflow.resume'
   | 'alert.markRead'
+  | 'alert.rule.create'
+  | 'alert.rule.update'
+  | 'alert.rule.delete'
+  | 'policy.pack.create'
+  | 'policy.pack.update'
+  | 'policy.pack.delete'
+  | 'policy.pack.assign'
+  | 'retention.policy.update'
+  | 'retention.purge'
+  | 'incident.bundle.export'
 
 export type CachifyQuery =
   | 'connection.list'
@@ -72,7 +112,17 @@ export type CachifyQuery =
   | 'workflow.execution.get'
   | 'history.list'
   | 'observability.dashboard'
+  | 'observability.keyspaceActivity'
+  | 'observability.failedOperations'
+  | 'observability.comparePeriods'
   | 'alert.list'
+  | 'alert.rule.list'
+  | 'policy.pack.list'
+  | 'policy.pack.assignment.list'
+  | 'retention.policy.list'
+  | 'storage.summary'
+  | 'incident.bundle.preview'
+  | 'incident.bundle.list'
 
 export interface CommandPayloadMap {
   'connection.create': ConnectionCreateRequest
@@ -87,7 +137,18 @@ export interface CommandPayloadMap {
   'workflow.template.delete': WorkflowTemplateDeleteRequest
   'workflow.execute': WorkflowExecuteRequest
   'workflow.rerun': WorkflowRerunRequest
+  'workflow.resume': WorkflowResumeRequest
   'alert.markRead': AlertMarkReadRequest
+  'alert.rule.create': AlertRuleCreateRequest
+  'alert.rule.update': AlertRuleUpdateRequest
+  'alert.rule.delete': AlertRuleDeleteRequest
+  'policy.pack.create': GovernancePolicyPackCreateRequest
+  'policy.pack.update': GovernancePolicyPackUpdateRequest
+  'policy.pack.delete': GovernancePolicyPackDeleteRequest
+  'policy.pack.assign': GovernanceAssignmentRequest
+  'retention.policy.update': RetentionPolicyUpdateRequest
+  'retention.purge': RetentionPurgeRequest
+  'incident.bundle.export': IncidentBundleExportRequest
 }
 
 export interface QueryPayloadMap {
@@ -104,7 +165,17 @@ export interface QueryPayloadMap {
   'workflow.execution.get': WorkflowExecutionGetRequest
   'history.list': HistoryQueryRequest
   'observability.dashboard': ObservabilityDashboardRequest
+  'observability.keyspaceActivity': KeyspaceActivityRequest
+  'observability.failedOperations': FailedOperationDrilldownRequest
+  'observability.comparePeriods': ComparePeriodsRequest
   'alert.list': AlertListRequest
+  'alert.rule.list': Record<string, never>
+  'policy.pack.list': Record<string, never>
+  'policy.pack.assignment.list': GovernanceAssignmentListRequest
+  'retention.policy.list': Record<string, never>
+  'storage.summary': Record<string, never>
+  'incident.bundle.preview': IncidentBundlePreviewRequest
+  'incident.bundle.list': IncidentBundleListRequest
 }
 
 export interface CommandResultMap {
@@ -120,7 +191,18 @@ export interface CommandResultMap {
   'workflow.template.delete': MutationResult
   'workflow.execute': WorkflowExecutionRecord
   'workflow.rerun': WorkflowExecutionRecord
+  'workflow.resume': WorkflowExecutionRecord
   'alert.markRead': MutationResult
+  'alert.rule.create': AlertRule
+  'alert.rule.update': AlertRule
+  'alert.rule.delete': MutationResult
+  'policy.pack.create': GovernancePolicyPack
+  'policy.pack.update': GovernancePolicyPack
+  'policy.pack.delete': MutationResult
+  'policy.pack.assign': MutationResult
+  'retention.policy.update': RetentionPolicy
+  'retention.purge': RetentionPurgeResult
+  'incident.bundle.export': IncidentBundle
 }
 
 export interface QueryResultMap {
@@ -137,7 +219,17 @@ export interface QueryResultMap {
   'workflow.execution.get': WorkflowExecutionRecord
   'history.list': HistoryEvent[]
   'observability.dashboard': ObservabilityDashboard
+  'observability.keyspaceActivity': KeyspaceActivityView
+  'observability.failedOperations': FailedOperationDrilldownResult
+  'observability.comparePeriods': ComparePeriodsResult
   'alert.list': AlertEvent[]
+  'alert.rule.list': AlertRule[]
+  'policy.pack.list': GovernancePolicyPack[]
+  'policy.pack.assignment.list': GovernanceAssignment[]
+  'retention.policy.list': RetentionPolicyListResult
+  'storage.summary': StorageSummary
+  'incident.bundle.preview': IncidentBundlePreview
+  'incident.bundle.list': IncidentBundle[]
 }
 
 export interface OperationError {

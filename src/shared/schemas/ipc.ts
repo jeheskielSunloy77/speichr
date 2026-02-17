@@ -10,6 +10,34 @@ export const workflowKindSchema = z.enum([
   'ttlNormalize',
   'warmupSet',
 ])
+export const alertRuleMetricSchema = z.enum([
+  'errorRate',
+  'latencyP95Ms',
+  'slowOperationCount',
+  'failedOperationCount',
+])
+export const governanceWeekdaySchema = z.enum([
+  'mon',
+  'tue',
+  'wed',
+  'thu',
+  'fri',
+  'sat',
+  'sun',
+])
+export const retentionDatasetSchema = z.enum([
+  'timelineEvents',
+  'observabilitySnapshots',
+  'workflowHistory',
+  'incidentArtifacts',
+])
+export const incidentBundleIncludeSchema = z.enum([
+  'timeline',
+  'logs',
+  'diagnostics',
+  'metrics',
+])
+export const redactionProfileSchema = z.enum(['default', 'strict'])
 
 export const connectionSecretSchema = z
   .object({
@@ -233,6 +261,137 @@ const workflowRerunPayloadSchema = z
   })
   .strict()
 
+const workflowResumePayloadSchema = z
+  .object({
+    executionId: idSchema,
+    guardrailConfirmed: z.boolean().optional(),
+  })
+  .strict()
+
+const alertRuleDraftSchema = z
+  .object({
+    name: z.string().min(1),
+    metric: alertRuleMetricSchema,
+    threshold: z.number().finite(),
+    lookbackMinutes: z.number().int().min(1).max(1440),
+    severity: z.enum(['info', 'warning', 'critical']),
+    connectionId: idSchema.optional(),
+    environment: environmentSchema.optional(),
+    enabled: z.boolean(),
+  })
+  .strict()
+
+const alertRuleCreatePayloadSchema = z
+  .object({
+    rule: alertRuleDraftSchema,
+  })
+  .strict()
+
+const alertRuleUpdatePayloadSchema = z
+  .object({
+    id: idSchema,
+    rule: alertRuleDraftSchema,
+  })
+  .strict()
+
+const alertRuleDeletePayloadSchema = z
+  .object({
+    id: idSchema,
+  })
+  .strict()
+
+const hhmmTimeSchema = z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/)
+
+const workflowScheduleWindowSchema = z
+  .object({
+    id: idSchema,
+    weekdays: z.array(governanceWeekdaySchema).min(1),
+    startTime: hhmmTimeSchema,
+    endTime: hhmmTimeSchema,
+    timezone: z.literal('UTC'),
+  })
+  .strict()
+
+const governancePolicyPackDraftSchema = z
+  .object({
+    name: z.string().min(1),
+    description: z.string().optional(),
+    environments: z.array(environmentSchema).min(1),
+    maxWorkflowItems: z.number().int().min(1).max(10000),
+    maxRetryAttempts: z.number().int().min(1).max(10),
+    schedulingEnabled: z.boolean(),
+    executionWindows: z.array(workflowScheduleWindowSchema).max(64),
+    enabled: z.boolean(),
+  })
+  .strict()
+
+const governancePolicyPackCreatePayloadSchema = z
+  .object({
+    policyPack: governancePolicyPackDraftSchema,
+  })
+  .strict()
+
+const governancePolicyPackUpdatePayloadSchema = z
+  .object({
+    id: idSchema,
+    policyPack: governancePolicyPackDraftSchema,
+  })
+  .strict()
+
+const governancePolicyPackDeletePayloadSchema = z
+  .object({
+    id: idSchema,
+  })
+  .strict()
+
+const governanceAssignmentPayloadSchema = z
+  .object({
+    connectionId: idSchema,
+    policyPackId: idSchema.optional(),
+  })
+  .strict()
+
+const retentionPolicySchema = z
+  .object({
+    dataset: retentionDatasetSchema,
+    retentionDays: z.number().int().min(1).max(3650),
+    storageBudgetMb: z.number().int().min(1).max(100_000),
+    autoPurgeOldest: z.boolean(),
+  })
+  .strict()
+
+const retentionPolicyUpdatePayloadSchema = z
+  .object({
+    policy: retentionPolicySchema,
+  })
+  .strict()
+
+const retentionPurgePayloadSchema = z
+  .object({
+    dataset: retentionDatasetSchema,
+    olderThan: z.string().optional(),
+    dryRun: z.boolean().optional(),
+  })
+  .strict()
+
+const incidentBundleBasePayloadSchema = z
+  .object({
+    from: z.string().min(1),
+    to: z.string().min(1),
+    connectionIds: z.array(idSchema).optional(),
+    includes: z.array(incidentBundleIncludeSchema).min(1),
+    redactionProfile: redactionProfileSchema,
+  })
+  .strict()
+
+const incidentBundlePreviewPayloadSchema = incidentBundleBasePayloadSchema
+
+const incidentBundleExportPayloadSchema = incidentBundleBasePayloadSchema
+  .extend({
+    destinationPath: z.string().min(1).optional(),
+  })
+  .strict()
+
 const workflowExecutionListPayloadSchema = z
   .object({
     connectionId: idSchema.optional(),
@@ -266,6 +425,36 @@ const observabilityDashboardPayloadSchema = z
   })
   .strict()
 
+const keyspaceActivityPayloadSchema = z
+  .object({
+    connectionId: idSchema.optional(),
+    from: z.string().min(1),
+    to: z.string().min(1),
+    intervalMinutes: z.number().int().min(1).max(1440).optional(),
+    limit: z.number().int().min(1).max(500).optional(),
+  })
+  .strict()
+
+const failedOperationDrilldownPayloadSchema = z
+  .object({
+    connectionId: idSchema.optional(),
+    eventId: idSchema.optional(),
+    from: z.string().optional(),
+    to: z.string().optional(),
+    limit: z.number().int().min(1).max(500),
+  })
+  .strict()
+
+const comparePeriodsPayloadSchema = z
+  .object({
+    connectionId: idSchema.optional(),
+    baselineFrom: z.string().min(1),
+    baselineTo: z.string().min(1),
+    compareFrom: z.string().min(1),
+    compareTo: z.string().min(1),
+  })
+  .strict()
+
 const alertListPayloadSchema = z
   .object({
     unreadOnly: z.boolean().optional(),
@@ -276,6 +465,18 @@ const alertListPayloadSchema = z
 const alertMarkReadPayloadSchema = z
   .object({
     id: idSchema,
+  })
+  .strict()
+
+const governanceAssignmentListPayloadSchema = z
+  .object({
+    connectionId: idSchema.optional(),
+  })
+  .strict()
+
+const incidentBundleListPayloadSchema = z
+  .object({
+    limit: z.number().int().min(1).max(500),
   })
   .strict()
 
@@ -366,8 +567,85 @@ export const commandEnvelopeSchema = z.discriminatedUnion('command', [
     .strict(),
   z
     .object({
+      command: z.literal('workflow.resume'),
+      payload: workflowResumePayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
       command: z.literal('alert.markRead'),
       payload: alertMarkReadPayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal('alert.rule.create'),
+      payload: alertRuleCreatePayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal('alert.rule.update'),
+      payload: alertRuleUpdatePayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal('alert.rule.delete'),
+      payload: alertRuleDeletePayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal('policy.pack.create'),
+      payload: governancePolicyPackCreatePayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal('policy.pack.update'),
+      payload: governancePolicyPackUpdatePayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal('policy.pack.delete'),
+      payload: governancePolicyPackDeletePayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal('policy.pack.assign'),
+      payload: governanceAssignmentPayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal('retention.policy.update'),
+      payload: retentionPolicyUpdatePayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal('retention.purge'),
+      payload: retentionPurgePayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal('incident.bundle.export'),
+      payload: incidentBundleExportPayloadSchema,
       correlationId: correlationIdSchema,
     })
     .strict(),
@@ -467,8 +745,78 @@ export const queryEnvelopeSchema = z.discriminatedUnion('query', [
     .strict(),
   z
     .object({
+      query: z.literal('observability.keyspaceActivity'),
+      payload: keyspaceActivityPayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      query: z.literal('observability.failedOperations'),
+      payload: failedOperationDrilldownPayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      query: z.literal('observability.comparePeriods'),
+      payload: comparePeriodsPayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
       query: z.literal('alert.list'),
       payload: alertListPayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      query: z.literal('alert.rule.list'),
+      payload: z.object({}).strict(),
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      query: z.literal('policy.pack.list'),
+      payload: z.object({}).strict(),
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      query: z.literal('policy.pack.assignment.list'),
+      payload: governanceAssignmentListPayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      query: z.literal('retention.policy.list'),
+      payload: z.object({}).strict(),
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      query: z.literal('storage.summary'),
+      payload: z.object({}).strict(),
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      query: z.literal('incident.bundle.preview'),
+      payload: incidentBundlePreviewPayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      query: z.literal('incident.bundle.list'),
+      payload: incidentBundleListPayloadSchema,
       correlationId: correlationIdSchema,
     })
     .strict(),

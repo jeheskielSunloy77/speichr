@@ -89,8 +89,30 @@ const handleCommand = async (
       return service.executeWorkflow(envelope.payload)
     case 'workflow.rerun':
       return service.rerunWorkflow(envelope.payload)
+    case 'workflow.resume':
+      return service.resumeWorkflow(envelope.payload)
     case 'alert.markRead':
       return service.markAlertRead(envelope.payload)
+    case 'alert.rule.create':
+      return service.createAlertRule(envelope.payload)
+    case 'alert.rule.update':
+      return service.updateAlertRule(envelope.payload)
+    case 'alert.rule.delete':
+      return service.deleteAlertRule(envelope.payload)
+    case 'policy.pack.create':
+      return service.createGovernancePolicyPack(envelope.payload)
+    case 'policy.pack.update':
+      return service.updateGovernancePolicyPack(envelope.payload)
+    case 'policy.pack.delete':
+      return service.deleteGovernancePolicyPack(envelope.payload)
+    case 'policy.pack.assign':
+      return service.assignGovernancePolicyPack(envelope.payload)
+    case 'retention.policy.update':
+      return service.updateRetentionPolicy(envelope.payload)
+    case 'retention.purge':
+      return service.purgeRetentionData(envelope.payload)
+    case 'incident.bundle.export':
+      return service.exportIncidentBundle(envelope.payload)
     default:
       return assertNever(envelope)
   }
@@ -127,8 +149,28 @@ const handleQuery = async (
       return service.listHistory(envelope.payload)
     case 'observability.dashboard':
       return service.getObservabilityDashboard(envelope.payload)
+    case 'observability.keyspaceActivity':
+      return service.getKeyspaceActivity(envelope.payload)
+    case 'observability.failedOperations':
+      return service.getFailedOperationDrilldown(envelope.payload)
+    case 'observability.comparePeriods':
+      return service.comparePeriods(envelope.payload)
     case 'alert.list':
       return service.listAlerts(envelope.payload)
+    case 'alert.rule.list':
+      return service.listAlertRules()
+    case 'policy.pack.list':
+      return service.listGovernancePolicyPacks()
+    case 'policy.pack.assignment.list':
+      return service.listGovernanceAssignments(envelope.payload)
+    case 'retention.policy.list':
+      return service.listRetentionPolicies()
+    case 'storage.summary':
+      return service.getStorageSummary()
+    case 'incident.bundle.preview':
+      return service.previewIncidentBundle(envelope.payload)
+    case 'incident.bundle.list':
+      return service.listIncidentBundles(envelope.payload)
     default:
       return assertNever(envelope)
   }

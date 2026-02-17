@@ -10,6 +10,31 @@ export type WorkflowExecutionStatus =
   | 'error'
   | 'aborted'
 export type AlertSeverity = 'info' | 'warning' | 'critical'
+export type AlertRuleMetric =
+  | 'errorRate'
+  | 'latencyP95Ms'
+  | 'slowOperationCount'
+  | 'failedOperationCount'
+export type GovernanceWeekday =
+  | 'mon'
+  | 'tue'
+  | 'wed'
+  | 'thu'
+  | 'fri'
+  | 'sat'
+  | 'sun'
+export type RetentionDataset =
+  | 'timelineEvents'
+  | 'observabilitySnapshots'
+  | 'workflowHistory'
+  | 'incidentArtifacts'
+export type IncidentBundleInclude =
+  | 'timeline'
+  | 'logs'
+  | 'diagnostics'
+  | 'metrics'
+export type RedactionProfile = 'default' | 'strict'
+export type CompareMetricDirection = 'improved' | 'regressed' | 'unchanged'
 
 export type OperationErrorCode =
   | 'VALIDATION_ERROR'
@@ -266,6 +291,10 @@ export interface WorkflowExecutionRecord {
   parameters: Record<string, unknown>
   stepResults: WorkflowStepResult[]
   errorMessage?: string
+  checkpointToken?: string
+  policyPackId?: string
+  scheduleWindowId?: string
+  resumedFromExecutionId?: string
 }
 
 export interface WorkflowExecuteRequest {
@@ -282,6 +311,11 @@ export interface WorkflowRerunRequest {
   executionId: string
   parameterOverrides?: Record<string, unknown>
   dryRun?: boolean
+  guardrailConfirmed?: boolean
+}
+
+export interface WorkflowResumeRequest {
+  executionId: string
   guardrailConfirmed?: boolean
 }
 
@@ -371,6 +405,130 @@ export interface ObservabilityDashboardRequest {
   limit?: number
 }
 
+export interface KeyspaceActivityRequest {
+  connectionId?: string
+  from: string
+  to: string
+  intervalMinutes?: number
+  limit?: number
+}
+
+export interface KeyspaceActivityPattern {
+  pattern: string
+  touchCount: number
+  errorCount: number
+  lastTouchedAt?: string
+}
+
+export interface KeyspaceActivityPoint {
+  bucket: string
+  touches: number
+  errors: number
+}
+
+export interface KeyspaceActivityView {
+  generatedAt: string
+  from: string
+  to: string
+  topPatterns: KeyspaceActivityPattern[]
+  distribution: KeyspaceActivityPoint[]
+}
+
+export interface FailedOperationDrilldownRequest {
+  connectionId?: string
+  eventId?: string
+  from?: string
+  to?: string
+  limit: number
+}
+
+export interface FailedOperationDiagnostic {
+  event: HistoryEvent
+  retryAttempts: number
+  relatedEvents: HistoryEvent[]
+  latestSnapshot?: ObservabilitySnapshot
+}
+
+export interface FailedOperationDrilldownResult {
+  generatedAt: string
+  diagnostics: FailedOperationDiagnostic[]
+}
+
+export interface ComparePeriodsRequest {
+  connectionId?: string
+  baselineFrom: string
+  baselineTo: string
+  compareFrom: string
+  compareTo: string
+}
+
+export interface CompareMetricDelta {
+  metric: 'operationCount' | 'errorRate' | 'latencyP95Ms' | 'slowOpCount'
+  baseline: number
+  compare: number
+  delta: number
+  deltaPercent: number | null
+  direction: CompareMetricDirection
+}
+
+export interface ComparePeriodsResult {
+  generatedAt: string
+  baselineLabel: string
+  compareLabel: string
+  metrics: CompareMetricDelta[]
+}
+
+export interface IncidentBundle {
+  id: string
+  createdAt: string
+  from: string
+  to: string
+  connectionIds: string[]
+  includes: IncidentBundleInclude[]
+  redactionProfile: RedactionProfile
+  checksum: string
+  artifactPath: string
+  timelineCount: number
+  logCount: number
+  diagnosticCount: number
+  metricCount: number
+}
+
+export interface IncidentBundlePreviewRequest {
+  from: string
+  to: string
+  connectionIds?: string[]
+  includes: IncidentBundleInclude[]
+  redactionProfile: RedactionProfile
+}
+
+export interface IncidentBundlePreview {
+  from: string
+  to: string
+  connectionIds: string[]
+  includes: IncidentBundleInclude[]
+  redactionProfile: RedactionProfile
+  timelineCount: number
+  logCount: number
+  diagnosticCount: number
+  metricCount: number
+  estimatedSizeBytes: number
+  checksumPreview: string
+}
+
+export interface IncidentBundleExportRequest {
+  from: string
+  to: string
+  connectionIds?: string[]
+  includes: IncidentBundleInclude[]
+  redactionProfile: RedactionProfile
+  destinationPath?: string
+}
+
+export interface IncidentBundleListRequest {
+  limit: number
+}
+
 export interface AlertEvent {
   id: string
   createdAt: string
@@ -390,4 +548,148 @@ export interface AlertListRequest {
 
 export interface AlertMarkReadRequest {
   id: string
+}
+
+export interface AlertRule {
+  id: string
+  name: string
+  metric: AlertRuleMetric
+  threshold: number
+  lookbackMinutes: number
+  severity: AlertSeverity
+  connectionId?: string
+  environment?: EnvironmentTag
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AlertRuleDraft {
+  name: string
+  metric: AlertRuleMetric
+  threshold: number
+  lookbackMinutes: number
+  severity: AlertSeverity
+  connectionId?: string
+  environment?: EnvironmentTag
+  enabled: boolean
+}
+
+export interface AlertRuleCreateRequest {
+  rule: AlertRuleDraft
+}
+
+export interface AlertRuleUpdateRequest {
+  id: string
+  rule: AlertRuleDraft
+}
+
+export interface AlertRuleDeleteRequest {
+  id: string
+}
+
+export interface WorkflowScheduleWindow {
+  id: string
+  weekdays: GovernanceWeekday[]
+  startTime: string
+  endTime: string
+  timezone: 'UTC'
+}
+
+export interface GovernancePolicyPack {
+  id: string
+  name: string
+  description?: string
+  environments: EnvironmentTag[]
+  maxWorkflowItems: number
+  maxRetryAttempts: number
+  schedulingEnabled: boolean
+  executionWindows: WorkflowScheduleWindow[]
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface GovernancePolicyPackDraft {
+  name: string
+  description?: string
+  environments: EnvironmentTag[]
+  maxWorkflowItems: number
+  maxRetryAttempts: number
+  schedulingEnabled: boolean
+  executionWindows: WorkflowScheduleWindow[]
+  enabled: boolean
+}
+
+export interface GovernancePolicyPackCreateRequest {
+  policyPack: GovernancePolicyPackDraft
+}
+
+export interface GovernancePolicyPackUpdateRequest {
+  id: string
+  policyPack: GovernancePolicyPackDraft
+}
+
+export interface GovernancePolicyPackDeleteRequest {
+  id: string
+}
+
+export interface GovernanceAssignmentRequest {
+  connectionId: string
+  policyPackId?: string
+}
+
+export interface GovernanceAssignment {
+  connectionId: string
+  policyPackId?: string
+}
+
+export interface GovernanceAssignmentListRequest {
+  connectionId?: string
+}
+
+export interface RetentionPolicy {
+  dataset: RetentionDataset
+  retentionDays: number
+  storageBudgetMb: number
+  autoPurgeOldest: boolean
+}
+
+export interface RetentionPolicyUpdateRequest {
+  policy: RetentionPolicy
+}
+
+export interface RetentionPolicyListResult {
+  policies: RetentionPolicy[]
+}
+
+export interface StorageDatasetSummary {
+  dataset: RetentionDataset
+  rowCount: number
+  totalBytes: number
+  budgetBytes: number
+  usageRatio: number
+  overBudget: boolean
+  oldestTimestamp?: string
+  newestTimestamp?: string
+}
+
+export interface StorageSummary {
+  generatedAt: string
+  datasets: StorageDatasetSummary[]
+  totalBytes: number
+}
+
+export interface RetentionPurgeRequest {
+  dataset: RetentionDataset
+  olderThan?: string
+  dryRun?: boolean
+}
+
+export interface RetentionPurgeResult {
+  dataset: RetentionDataset
+  cutoff: string
+  dryRun: boolean
+  deletedRows: number
+  freedBytes: number
 }
