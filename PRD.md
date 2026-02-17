@@ -4,7 +4,7 @@
 
 - Product: Cachify Studio
 - Document type: Master PRD
-- Version: 1.3
+- Version: 1.4
 - Status: Draft
 - Last updated: 2026-02-17
 - Owners: Product + Engineering
@@ -42,9 +42,11 @@ Redis and Memcached workflows are often split across CLI tools, scripts, and one
 
 1. Desktop shell: Electron.
 2. UI stack: React + TypeScript + Vite + shadcn/ui + Tailwind CSS.
-3. Storage model: local-only metadata persistence; no centralized backend.
-4. Cache engines: Redis and Memcached are first-class targets in all versions.
-5. Packaging: Linux, macOS, and Windows.
+3. JavaScript runtime and package manager: Bun.
+4. Test runner standard: Vitest (kept as canonical test runner while adopting Bun runtime tooling).
+5. Storage model: local-only metadata persistence; no centralized backend.
+6. Cache engines: Redis and Memcached are first-class targets in all versions.
+7. Packaging: Linux, macOS, and Windows.
 
 ## Clean Architecture Blueprint
 
@@ -147,6 +149,7 @@ Redis and Memcached workflows are often split across CLI tools, scripts, and one
    - `ci-nightly.yml` on schedule: full suite including end-to-end tests.
 3. Branch protection requires passing checks from the PR workflow before merge.
 4. CLI test policy is two-tiered:
+   - Canonical test runner for unit/contract/integration suites is Vitest.
    - Fast gate command (`test`) must run unit + contract tests (not unit-only).
    - Full suite command (`test:all`) must run unit + contract + integration + e2e/smoke tests.
 5. Local and CI pipelines must call the same underlying scripts to prevent drift.
@@ -221,8 +224,8 @@ Redis and Memcached workflows are often split across CLI tools, scripts, and one
 
 ### V1 Example Commit Sequence (only an example, no need to follow this exact sequence as long as milestones are meaningful and reviewable)
 
-1. `chore(scaffold): bootstrap electron + vite workspace`
-   - Mandatory first checkpoint for V1 immediately after initial Electron + Vite scaffolding is complete.
+1. `chore(scaffold): bootstrap electron + vite + bun workspace`
+   - Mandatory first checkpoint for V1 immediately after initial Electron + Vite scaffolding and Bun toolchain setup is complete.
 2. `feat(architecture): add initial layer boundaries and IPC contract skeleton`
 3. `feat(connections): implement profile CRUD and connection test flow`
 4. `feat(core-ops): implement read/write/search/delete workflows`
@@ -682,6 +685,8 @@ Contract ownership and mandatory tests:
 14. GitHub Actions is the canonical CI runner platform.
 15. Test execution follows two tiers: fast gate and full suite.
 16. Fast gate includes unit and contract tests; full suite adds integration and end-to-end/smoke tests.
+17. Bun is the default JavaScript runtime/package manager for local and CI scripts.
+18. Vitest remains the default test runner unless a future PRD revision explicitly changes this policy.
 
 ## Document Governance Rules
 
@@ -706,6 +711,7 @@ Contract ownership and mandatory tests:
 
 | Date       | Version | Author | Change                                                                                                                                                                                         |
 | ---------- | ------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-02-17 | 1.4     | Codex  | Updated stack policy to adopt Bun as runtime/package manager while retaining Vitest as the canonical test runner; aligned scaffold, test policy, and assumptions.                              |
 | 2026-02-17 | 1.3     | Codex  | Added AI-agent implementation workflow with current-branch-only commits, minimum 8 milestone commits per version, detailed Conventional Commit requirements, and unpushed completion defaults. |
 | 2026-02-17 | 1.2     | Codex  | Locked CI to GitHub Actions and added two-tier CLI/CI test execution policy (fast gate + full suite).                                                                                          |
 | 2026-02-17 | 1.1     | Codex  | Added strict Clean Architecture blueprint with enforceable layer rules, IPC/repository contracts, architecture validation scenarios, and governance updates.                                   |
