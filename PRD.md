@@ -41,7 +41,7 @@ Redis and Memcached workflows are often split across CLI tools, scripts, and one
 ## Platform and Architecture Constraints
 
 1. Desktop shell: Electron.
-2. UI stack: React + TypeScript + Vite + shadcn/ui + Tailwind CSS.
+2. UI stack: React + TypeScript + Vite + shadcn/ui + Tailwind CSS. for the shadcn/ui refer to the components.json which is the config file for the shadcn/ui components, if you want to tweek the design or move the directory to better suit the project structure you can do that but make sure to update the components.json file with the correct path to the components.
 3. JavaScript runtime and package manager: Bun.
 4. Test runner standard: Vitest (kept as canonical test runner while adopting Bun runtime tooling).
 5. Storage model: local-only metadata persistence; no centralized backend.
@@ -321,230 +321,230 @@ Redis and Memcached workflows are often split across CLI tools, scripts, and one
 ## Canonical Data Model and Interfaces
 
 ```ts
-export type CacheEngine = "redis" | "memcached";
-export type EnvironmentTag = "dev" | "staging" | "prod";
-export type EventSource = "app" | "engine";
-export type BackoffStrategy = "fixed" | "exponential";
+export type CacheEngine = 'redis' | 'memcached'
+export type EnvironmentTag = 'dev' | 'staging' | 'prod'
+export type EventSource = 'app' | 'engine'
+export type BackoffStrategy = 'fixed' | 'exponential'
 export type OperationErrorCode =
-  | "VALIDATION_ERROR"
-  | "UNAUTHORIZED"
-  | "TIMEOUT"
-  | "CONNECTION_FAILED"
-  | "NOT_SUPPORTED"
-  | "CONFLICT"
-  | "INTERNAL_ERROR";
+	| 'VALIDATION_ERROR'
+	| 'UNAUTHORIZED'
+	| 'TIMEOUT'
+	| 'CONNECTION_FAILED'
+	| 'NOT_SUPPORTED'
+	| 'CONFLICT'
+	| 'INTERNAL_ERROR'
 
 export interface ProviderCapabilities {
-  supportsTTL: boolean;
-  supportsMonitorStream: boolean;
-  supportsSlowLog: boolean;
-  supportsBulkDeletePreview: boolean;
-  supportsSnapshotRestore: boolean;
-  supportsPatternScan: boolean;
+	supportsTTL: boolean
+	supportsMonitorStream: boolean
+	supportsSlowLog: boolean
+	supportsBulkDeletePreview: boolean
+	supportsSnapshotRestore: boolean
+	supportsPatternScan: boolean
 }
 
 export interface ProviderEvent {
-  eventType: string;
-  connectionId: string;
-  timestamp: string;
-  payload: Record<string, unknown>;
+	eventType: string
+	connectionId: string
+	timestamp: string
+	payload: Record<string, unknown>
 }
 
 export interface ConnectionProfile {
-  id: string;
-  name: string;
-  engine: CacheEngine;
-  host: string;
-  port: number;
-  dbIndex?: number; // Redis only
-  tlsEnabled: boolean;
-  environment: EnvironmentTag;
-  tags: string[];
-  secretRef: string; // Keychain handle, not raw credential
-  readOnly: boolean;
-  timeoutMs: number;
-  retryPolicyId?: string;
-  createdAt: string;
-  updatedAt: string;
+	id: string
+	name: string
+	engine: CacheEngine
+	host: string
+	port: number
+	dbIndex?: number // Redis only
+	tlsEnabled: boolean
+	environment: EnvironmentTag
+	tags: string[]
+	secretRef: string // Keychain handle, not raw credential
+	readOnly: boolean
+	timeoutMs: number
+	retryPolicyId?: string
+	createdAt: string
+	updatedAt: string
 }
 
 // Lifecycle: connect -> operation calls -> disconnect
 export interface CacheProvider {
-  getCapabilities(): ProviderCapabilities;
-  connect(profile: ConnectionProfile): Promise<{ connectionId: string }>;
-  disconnect(connectionId: string): Promise<void>;
-  ping(connectionId: string): Promise<number>;
-  listKeys(args: {
-    connectionId: string;
-    cursor?: string;
-    limit: number;
-  }): Promise<{ keys: string[]; nextCursor?: string }>;
-  searchKeys(args: {
-    connectionId: string;
-    pattern: string;
-    limit: number;
-  }): Promise<string[]>;
-  getValue(args: { connectionId: string; key: string }): Promise<unknown>;
-  setValue(args: {
-    connectionId: string;
-    key: string;
-    value: unknown;
-    ttlSeconds?: number;
-  }): Promise<void>;
-  deleteKey(args: { connectionId: string; key: string }): Promise<void>;
-  getStats(args: { connectionId: string }): Promise<ObservabilitySnapshot>;
-  subscribeEvents?(
-    args: { connectionId: string; eventTypes?: string[] },
-    onEvent: (event: ProviderEvent) => void,
-  ): Promise<() => void>;
+	getCapabilities(): ProviderCapabilities
+	connect(profile: ConnectionProfile): Promise<{ connectionId: string }>
+	disconnect(connectionId: string): Promise<void>
+	ping(connectionId: string): Promise<number>
+	listKeys(args: {
+		connectionId: string
+		cursor?: string
+		limit: number
+	}): Promise<{ keys: string[]; nextCursor?: string }>
+	searchKeys(args: {
+		connectionId: string
+		pattern: string
+		limit: number
+	}): Promise<string[]>
+	getValue(args: { connectionId: string; key: string }): Promise<unknown>
+	setValue(args: {
+		connectionId: string
+		key: string
+		value: unknown
+		ttlSeconds?: number
+	}): Promise<void>
+	deleteKey(args: { connectionId: string; key: string }): Promise<void>
+	getStats(args: { connectionId: string }): Promise<ObservabilitySnapshot>
+	subscribeEvents?(
+		args: { connectionId: string; eventTypes?: string[] },
+		onEvent: (event: ProviderEvent) => void,
+	): Promise<() => void>
 }
 
 export interface SecretStore {
-  saveSecret(profileId: string, payload: Record<string, string>): Promise<void>;
-  getSecret(profileId: string): Promise<Record<string, string>>;
-  deleteSecret(profileId: string): Promise<void>;
+	saveSecret(profileId: string, payload: Record<string, string>): Promise<void>
+	getSecret(profileId: string): Promise<Record<string, string>>
+	deleteSecret(profileId: string): Promise<void>
 }
 
 export interface WorkflowTemplate {
-  id: string;
-  name: string;
-  kind: "deleteByPattern" | "ttlNormalize" | "warmupSet";
-  parameters: Record<string, unknown>;
-  requiresApprovalOnProd: boolean;
-  supportsDryRun: boolean;
+	id: string
+	name: string
+	kind: 'deleteByPattern' | 'ttlNormalize' | 'warmupSet'
+	parameters: Record<string, unknown>
+	requiresApprovalOnProd: boolean
+	supportsDryRun: boolean
 }
 
 export interface WorkflowExecutionPolicy {
-  id: string;
-  maxAttempts: number;
-  backoffMs: number;
-  backoffStrategy: BackoffStrategy;
-  abortOnErrorRate: number;
+	id: string
+	maxAttempts: number
+	backoffMs: number
+	backoffStrategy: BackoffStrategy
+	abortOnErrorRate: number
 }
 
 export interface HistoryEvent {
-  id: string;
-  timestamp: string;
-  source: EventSource;
-  connectionId: string;
-  action: string;
-  keyOrPattern: string;
-  durationMs: number;
-  status: "success" | "error" | "blocked";
-  redactedDiff?: string;
+	id: string
+	timestamp: string
+	source: EventSource
+	connectionId: string
+	action: string
+	keyOrPattern: string
+	durationMs: number
+	status: 'success' | 'error' | 'blocked'
+	redactedDiff?: string
 }
 
 export interface ObservabilitySnapshot {
-  timestamp: string;
-  latencyP50Ms: number;
-  latencyP95Ms: number;
-  errorRate: number;
-  reconnectCount: number;
-  opsPerSecond: number;
-  slowOpCount: number;
+	timestamp: string
+	latencyP50Ms: number
+	latencyP95Ms: number
+	errorRate: number
+	reconnectCount: number
+	opsPerSecond: number
+	slowOpCount: number
 }
 
 export interface IncidentBundle {
-  id: string;
-  from: string;
-  to: string;
-  connectionIds: string[];
-  includes: Array<"timeline" | "logs" | "diagnostics" | "metrics">;
-  redactionProfile: "default" | "strict";
-  checksum: string;
+	id: string
+	from: string
+	to: string
+	connectionIds: string[]
+	includes: Array<'timeline' | 'logs' | 'diagnostics' | 'metrics'>
+	redactionProfile: 'default' | 'strict'
+	checksum: string
 }
 
 export interface SnapshotRecord {
-  id: string;
-  connectionId: string;
-  key: string;
-  capturedAt: string;
-  redactedValueHash: string;
-  ttlSeconds?: number;
+	id: string
+	connectionId: string
+	key: string
+	capturedAt: string
+	redactedValueHash: string
+	ttlSeconds?: number
 }
 
 export interface WorkflowExecutionRecord {
-  id: string;
-  workflowTemplateId: string;
-  connectionId: string;
-  startedAt: string;
-  finishedAt?: string;
-  status: "pending" | "running" | "success" | "error" | "aborted";
-  retryCount: number;
-  checkpointToken?: string;
+	id: string
+	workflowTemplateId: string
+	connectionId: string
+	startedAt: string
+	finishedAt?: string
+	status: 'pending' | 'running' | 'success' | 'error' | 'aborted'
+	retryCount: number
+	checkpointToken?: string
 }
 
 export interface OperationError {
-  code: OperationErrorCode;
-  message: string;
-  retryable: boolean;
-  details?: Record<string, unknown>;
+	code: OperationErrorCode
+	message: string
+	retryable: boolean
+	details?: Record<string, unknown>
 }
 
 export interface IpcCommandEnvelope<TPayload> {
-  command: string;
-  payload: TPayload;
-  correlationId: string;
+	command: string
+	payload: TPayload
+	correlationId: string
 }
 
 export interface IpcQueryEnvelope<TPayload> {
-  query: string;
-  payload: TPayload;
-  correlationId: string;
+	query: string
+	payload: TPayload
+	correlationId: string
 }
 
 export interface IpcResponseEnvelope<TData> {
-  ok: boolean;
-  correlationId: string;
-  data?: TData;
-  error?: OperationError;
+	ok: boolean
+	correlationId: string
+	data?: TData
+	error?: OperationError
 }
 
 export interface ConnectionRepository {
-  save(profile: ConnectionProfile): Promise<void>;
-  findById(id: string): Promise<ConnectionProfile | null>;
-  list(): Promise<ConnectionProfile[]>;
-  delete(id: string): Promise<void>;
+	save(profile: ConnectionProfile): Promise<void>
+	findById(id: string): Promise<ConnectionProfile | null>
+	list(): Promise<ConnectionProfile[]>
+	delete(id: string): Promise<void>
 }
 
 export interface HistoryRepository {
-  append(event: HistoryEvent): Promise<void>;
-  query(args: {
-    connectionId?: string;
-    from?: string;
-    to?: string;
-    limit: number;
-  }): Promise<HistoryEvent[]>;
-  purgeOlderThan(timestamp: string): Promise<number>;
+	append(event: HistoryEvent): Promise<void>
+	query(args: {
+		connectionId?: string
+		from?: string
+		to?: string
+		limit: number
+	}): Promise<HistoryEvent[]>
+	purgeOlderThan(timestamp: string): Promise<number>
 }
 
 export interface ObservabilityRepository {
-  append(snapshot: ObservabilitySnapshot): Promise<void>;
-  querySeries(args: {
-    connectionId?: string;
-    from: string;
-    to: string;
-    interval: string;
-  }): Promise<ObservabilitySnapshot[]>;
-  purgeOlderThan(timestamp: string): Promise<number>;
+	append(snapshot: ObservabilitySnapshot): Promise<void>
+	querySeries(args: {
+		connectionId?: string
+		from: string
+		to: string
+		interval: string
+	}): Promise<ObservabilitySnapshot[]>
+	purgeOlderThan(timestamp: string): Promise<number>
 }
 
 export interface WorkflowRepository {
-  saveTemplate(template: WorkflowTemplate): Promise<void>;
-  listTemplates(): Promise<WorkflowTemplate[]>;
-  saveExecution(execution: WorkflowExecutionRecord): Promise<void>;
-  listExecutions(args: {
-    workflowTemplateId?: string;
-    limit: number;
-  }): Promise<WorkflowExecutionRecord[]>;
+	saveTemplate(template: WorkflowTemplate): Promise<void>
+	listTemplates(): Promise<WorkflowTemplate[]>
+	saveExecution(execution: WorkflowExecutionRecord): Promise<void>
+	listExecutions(args: {
+		workflowTemplateId?: string
+		limit: number
+	}): Promise<WorkflowExecutionRecord[]>
 }
 
 export interface SnapshotRepository {
-  save(record: SnapshotRecord): Promise<void>;
-  findLatest(args: {
-    connectionId: string;
-    key: string;
-  }): Promise<SnapshotRecord | null>;
+	save(record: SnapshotRecord): Promise<void>
+	findLatest(args: {
+		connectionId: string
+		key: string
+	}): Promise<SnapshotRecord | null>
 }
 ```
 
