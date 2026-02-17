@@ -14,12 +14,7 @@
 		"types": ["node"],
 		"baseUrl": ".",
 		"paths": {
-			"@/*": ["./src/*"],
-			"@/components/*": ["./src/renderer/components/*"],
-			"@/lib/*": ["./src/renderer/lib/*"],
-			"@/hooks/*": ["./src/renderer/hooks/*"],
-			"@/styles/*": ["./src/renderer/styles/*"],
-			"@/shared/*": ["./src/shared/*"]
+			"@/*": ["./src/*"]
 		}
 	},
 	"include": ["src", "forge.env.d.ts"]
