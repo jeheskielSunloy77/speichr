@@ -78,17 +78,19 @@ const handleCommand = async (
     case 'key.delete':
       return service.deleteKey(envelope.payload)
     case 'rollback.restore':
+      return service.restoreSnapshot(envelope.payload)
     case 'workflow.template.create':
+      return service.createWorkflowTemplate(envelope.payload)
     case 'workflow.template.update':
+      return service.updateWorkflowTemplate(envelope.payload)
     case 'workflow.template.delete':
+      return service.deleteWorkflowTemplate(envelope.payload)
     case 'workflow.execute':
+      return service.executeWorkflow(envelope.payload)
     case 'workflow.rerun':
+      return service.rerunWorkflow(envelope.payload)
     case 'alert.markRead':
-      throw new OperationFailure(
-        'NOT_SUPPORTED',
-        `Command "${envelope.command}" is not available yet.`,
-        false,
-      )
+      return service.markAlertRead(envelope.payload)
     default:
       return assertNever(envelope)
   }
@@ -112,18 +114,21 @@ const handleQuery = async (
     case 'key.get':
       return service.getKey(envelope.payload)
     case 'snapshot.list':
+      return service.listSnapshots(envelope.payload)
     case 'workflow.template.list':
+      return service.listWorkflowTemplates()
     case 'workflow.preview':
+      return service.previewWorkflow(envelope.payload)
     case 'workflow.execution.list':
+      return service.listWorkflowExecutions(envelope.payload)
     case 'workflow.execution.get':
+      return service.getWorkflowExecution(envelope.payload)
     case 'history.list':
+      return service.listHistory(envelope.payload)
     case 'observability.dashboard':
+      return service.getObservabilityDashboard(envelope.payload)
     case 'alert.list':
-      throw new OperationFailure(
-        'NOT_SUPPORTED',
-        `Query "${envelope.query}" is not available yet.`,
-        false,
-      )
+      return service.listAlerts(envelope.payload)
     default:
       return assertNever(envelope)
   }

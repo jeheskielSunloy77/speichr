@@ -5,14 +5,21 @@ import started from 'electron-squirrel-startup'
 import type BetterSqlite3 from 'better-sqlite3'
 
 import { CachifyService } from './application/cachify-service'
+import { DesktopNotificationPublisher } from './infrastructure/notifications/desktop-notification-publisher'
 import { DefaultCacheGateway } from './infrastructure/providers/cache-gateway'
 import { InMemorySecretStore } from './infrastructure/secrets/in-memory-secret-store'
 import { KeytarSecretStore } from './infrastructure/secrets/keytar-secret-store'
 import { registerIpcHandlers } from './interface-adapters/ipc'
 import {
+  SqliteAlertRepository,
   createSqliteDatabase,
   SqliteConnectionRepository,
+  SqliteHistoryRepository,
   SqliteMemcachedKeyIndexRepository,
+  SqliteObservabilityRepository,
+  SqliteSnapshotRepository,
+  SqliteWorkflowExecutionRepository,
+  SqliteWorkflowTemplateRepository,
 } from './persistence/sqlite'
 
 if (started) {
@@ -36,6 +43,12 @@ const initializeRuntime = (): RuntimeContext => {
 
   const connectionRepository = new SqliteConnectionRepository(db)
   const memcachedKeyIndexRepository = new SqliteMemcachedKeyIndexRepository(db)
+  const snapshotRepository = new SqliteSnapshotRepository(db)
+  const workflowTemplateRepository = new SqliteWorkflowTemplateRepository(db)
+  const workflowExecutionRepository = new SqliteWorkflowExecutionRepository(db)
+  const historyRepository = new SqliteHistoryRepository(db)
+  const observabilityRepository = new SqliteObservabilityRepository(db)
+  const alertRepository = new SqliteAlertRepository(db)
 
   const secretStore =
     process.env.CACHIFY_SECRET_STORE === 'memory'
@@ -43,12 +56,22 @@ const initializeRuntime = (): RuntimeContext => {
       : new KeytarSecretStore()
 
   const cacheGateway = new DefaultCacheGateway(memcachedKeyIndexRepository)
+  const notificationPublisher = new DesktopNotificationPublisher()
 
   const service = new CachifyService(
     connectionRepository,
     secretStore,
     memcachedKeyIndexRepository,
     cacheGateway,
+    {
+      snapshotRepository,
+      workflowTemplateRepository,
+      workflowExecutionRepository,
+      historyRepository,
+      observabilityRepository,
+      alertRepository,
+      notificationPublisher,
+    },
   )
 
   registerIpcHandlers(service)
