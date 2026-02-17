@@ -42,7 +42,12 @@ type FormState = {
 	environment: 'dev' | 'staging' | 'prod'
 	tags: string
 	readOnly: boolean
+	forceReadOnly: boolean
 	timeoutMs: string
+	retryMaxAttempts: string
+	retryBackoffMs: string
+	retryBackoffStrategy: 'fixed' | 'exponential'
+	retryAbortOnErrorRate: string
 	username: string
 	password: string
 }
@@ -57,7 +62,12 @@ const createDefaultFormState = (): FormState => ({
 	environment: 'dev',
 	tags: '',
 	readOnly: false,
+	forceReadOnly: false,
 	timeoutMs: String(DEFAULT_TIMEOUT_MS),
+	retryMaxAttempts: '1',
+	retryBackoffMs: '250',
+	retryBackoffStrategy: 'fixed',
+	retryAbortOnErrorRate: '1',
 	username: '',
 	password: '',
 })
@@ -72,7 +82,12 @@ const profileToFormState = (profile: ConnectionProfile): FormState => ({
 	environment: profile.environment,
 	tags: profile.tags.join(', '),
 	readOnly: profile.readOnly,
+	forceReadOnly: Boolean(profile.forceReadOnly),
 	timeoutMs: String(profile.timeoutMs),
+	retryMaxAttempts: String(profile.retryMaxAttempts ?? 1),
+	retryBackoffMs: String(profile.retryBackoffMs ?? 250),
+	retryBackoffStrategy: profile.retryBackoffStrategy ?? 'fixed',
+	retryAbortOnErrorRate: String(profile.retryAbortOnErrorRate ?? 1),
 	username: '',
 	password: '',
 })
@@ -104,6 +119,9 @@ export const ConnectionFormDialog = ({
 		const parsedPort = Number(form.port)
 		const parsedTimeoutMs = Number(form.timeoutMs)
 		const parsedDbIndex = Number(form.dbIndex)
+		const parsedRetryMaxAttempts = Number(form.retryMaxAttempts)
+		const parsedRetryBackoffMs = Number(form.retryBackoffMs)
+		const parsedRetryAbortOnErrorRate = Number(form.retryAbortOnErrorRate)
 
 		return {
 			name: form.name.trim(),
@@ -121,9 +139,20 @@ export const ConnectionFormDialog = ({
 				.map((tag) => tag.trim())
 				.filter(Boolean),
 			readOnly: form.readOnly,
+			forceReadOnly: form.forceReadOnly,
 			timeoutMs: Number.isFinite(parsedTimeoutMs)
 				? parsedTimeoutMs
 				: DEFAULT_TIMEOUT_MS,
+			retryMaxAttempts: Number.isFinite(parsedRetryMaxAttempts)
+				? parsedRetryMaxAttempts
+				: 1,
+			retryBackoffMs: Number.isFinite(parsedRetryBackoffMs)
+				? parsedRetryBackoffMs
+				: 250,
+			retryBackoffStrategy: form.retryBackoffStrategy,
+			retryAbortOnErrorRate: Number.isFinite(parsedRetryAbortOnErrorRate)
+				? parsedRetryAbortOnErrorRate
+				: 1,
 		}
 	}, [form])
 
@@ -316,6 +345,57 @@ export const ConnectionFormDialog = ({
 					</div>
 
 					<div className='space-y-1.5'>
+						<Label htmlFor='connection-retry-max'>Retry max attempts</Label>
+						<Input
+							id='connection-retry-max'
+							value={form.retryMaxAttempts}
+							onChange={(event) =>
+								onFieldChange('retryMaxAttempts', event.target.value)
+							}
+						/>
+					</div>
+
+					<div className='space-y-1.5'>
+						<Label htmlFor='connection-retry-backoff'>Retry backoff (ms)</Label>
+						<Input
+							id='connection-retry-backoff'
+							value={form.retryBackoffMs}
+							onChange={(event) =>
+								onFieldChange('retryBackoffMs', event.target.value)
+							}
+						/>
+					</div>
+
+					<div className='space-y-1.5'>
+						<Label htmlFor='connection-retry-strategy'>Backoff strategy</Label>
+						<select
+							id='connection-retry-strategy'
+							value={form.retryBackoffStrategy}
+							onChange={(event) =>
+								onFieldChange(
+									'retryBackoffStrategy',
+									event.target.value as FormState['retryBackoffStrategy'],
+								)
+							}
+							className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
+						>
+							<option value='fixed'>fixed</option>
+							<option value='exponential'>exponential</option>
+						</select>
+					</div>
+
+					<div className='space-y-1.5'>
+						<Label htmlFor='connection-retry-abort'>Abort on error rate (0-1)</Label>
+						<Input
+							id='connection-retry-abort'
+							value={form.retryAbortOnErrorRate}
+							onChange={(event) =>
+								onFieldChange('retryAbortOnErrorRate', event.target.value)
+							}
+						/>
+					</div>
+
+					<div className='space-y-1.5'>
 						<Label htmlFor='connection-tags'>Tags (comma separated)</Label>
 						<Input
 							id='connection-tags'
@@ -361,6 +441,16 @@ export const ConnectionFormDialog = ({
 						<Switch
 							checked={form.readOnly}
 							onCheckedChange={(checked) => onFieldChange('readOnly', checked)}
+						/>
+					</div>
+
+					<div className='flex items-center justify-between rounded-none border p-2.5 text-xs'>
+						<span>Force read-only policy</span>
+						<Switch
+							checked={form.forceReadOnly}
+							onCheckedChange={(checked) =>
+								onFieldChange('forceReadOnly', checked)
+							}
 						/>
 					</div>
 				</div>

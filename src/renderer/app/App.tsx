@@ -1,749 +1,951 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-	Edit2Icon,
-	PlusIcon,
-	ServerIcon,
-	Settings2Icon,
-	ShieldIcon,
-	Trash2Icon,
+  Edit2Icon,
+  PlusIcon,
+  ServerIcon,
+  Settings2Icon,
+  ShieldIcon,
+  Trash2Icon,
 } from 'lucide-react'
 import * as React from 'react'
 import { toast } from 'sonner'
 
 import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
 } from '@/renderer/components/ui/alert-dialog'
 import { Badge } from '@/renderer/components/ui/badge'
 import { Button } from '@/renderer/components/ui/button'
 import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
 } from '@/renderer/components/ui/card'
-import { Separator } from '@/renderer/components/ui/separator'
+import { Checkbox } from '@/renderer/components/ui/checkbox'
 import {
-	RendererOperationError,
-	unwrapResponse,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/renderer/components/ui/dialog'
+import { Separator } from '@/renderer/components/ui/separator'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/renderer/components/ui/tabs'
+import { AlertsPanel } from '@/renderer/features/alerts/alerts-panel'
+import {
+  RendererOperationError,
+  unwrapResponse,
 } from '@/renderer/features/common/ipc'
 import { ConnectionFormDialog } from '@/renderer/features/connections/connection-form-dialog'
+import { ObservabilityPanel } from '@/renderer/features/observability/observability-panel'
 import { SettingsPanel } from '@/renderer/features/settings/settings-panel'
+import { WorkflowPanel } from '@/renderer/features/workflows/workflow-panel'
 import { KeyDetailCard } from '@/renderer/features/workspace/key-detail-card'
 import { KeyListCard } from '@/renderer/features/workspace/key-list-card'
 import { useUiStore } from '@/renderer/state/ui-store'
 import type {
-	ConnectionProfile,
-	KeyListResult,
-	KeyValueRecord,
-	ProviderCapabilities,
+  ConnectionProfile,
+  KeyListResult,
+  KeyValueRecord,
+  ProviderCapabilities,
+  SnapshotRecord,
 } from '@/shared/contracts/cache'
 
 const DEFAULT_PAGE_SIZE = 100
 
 type ConnectionDialogState = {
-	open: boolean
-	mode: 'create' | 'edit'
-	profile: ConnectionProfile | null
+  open: boolean
+  mode: 'create' | 'edit'
+  profile: ConnectionProfile | null
 }
 
+type WorkspaceTab = 'workspace' | 'workflows' | 'observability' | 'alerts'
+
 const defaultKeyListResult: KeyListResult = {
-	keys: [],
-	nextCursor: undefined,
+  keys: [],
+  nextCursor: undefined,
 }
 
 const defaultCapabilities: ProviderCapabilities = {
-	supportsTTL: true,
-	supportsMonitorStream: false,
-	supportsSlowLog: false,
-	supportsBulkDeletePreview: false,
-	supportsSnapshotRestore: false,
-	supportsPatternScan: true,
+  supportsTTL: true,
+  supportsMonitorStream: false,
+  supportsSlowLog: false,
+  supportsBulkDeletePreview: false,
+  supportsSnapshotRestore: false,
+  supportsPatternScan: true,
 }
 
 type QueryErrorState = {
-	message: string
-	retryable: boolean
+  message: string
+  retryable: boolean
 }
 
 const getQueryErrorState = (error: unknown): QueryErrorState | undefined => {
-	if (!error) {
-		return undefined
-	}
+  if (!error) {
+    return undefined
+  }
 
-	if (error instanceof RendererOperationError) {
-		return {
-			message: error.message,
-			retryable: Boolean(error.retryable),
-		}
-	}
+  if (error instanceof RendererOperationError) {
+    return {
+      message: error.message,
+      retryable: Boolean(error.retryable),
+    }
+  }
 
-	if (error instanceof Error) {
-		return {
-			message: error.message,
-			retryable: false,
-		}
-	}
+  if (error instanceof Error) {
+    return {
+      message: error.message,
+      retryable: false,
+    }
+  }
 
-	return {
-		message: 'Operation failed.',
-		retryable: false,
-	}
+  return {
+    message: 'Operation failed.',
+    retryable: false,
+  }
 }
 
 export default function App() {
-	const queryClient = useQueryClient()
+  const queryClient = useQueryClient()
 
-	const {
-		selectedConnectionId,
-		selectedKey,
-		setSelectedConnectionId,
-		setSelectedKey,
-		isSettingsOpen,
-		setSettingsOpen,
-	} = useUiStore()
+  const {
+    selectedConnectionId,
+    selectedKey,
+    setSelectedConnectionId,
+    setSelectedKey,
+    isSettingsOpen,
+    setSettingsOpen,
+  } = useUiStore()
 
-	const [connectionDialog, setConnectionDialog] =
-		React.useState<ConnectionDialogState>({
-			open: false,
-			mode: 'create',
-			profile: null,
-		})
+  const [activeTab, setActiveTab] = React.useState<WorkspaceTab>('workspace')
 
-	const [connectionIdPendingDelete, setConnectionIdPendingDelete] =
-		React.useState<string | null>(null)
-	const [keyPendingDelete, setKeyPendingDelete] = React.useState<string | null>(
-		null,
-	)
+  const [connectionDialog, setConnectionDialog] =
+    React.useState<ConnectionDialogState>({
+      open: false,
+      mode: 'create',
+      profile: null,
+    })
 
-	const [searchPattern, setSearchPattern] = React.useState('')
-	const [cursor, setCursor] = React.useState<string | undefined>(undefined)
+  const [connectionIdPendingDelete, setConnectionIdPendingDelete] =
+    React.useState<string | null>(null)
+  const [keyPendingDelete, setKeyPendingDelete] = React.useState<string | null>(
+    null,
+  )
+  const [prodDeleteConfirmed, setProdDeleteConfirmed] = React.useState(false)
 
-	const [keyName, setKeyName] = React.useState('')
-	const [keyValue, setKeyValue] = React.useState('')
-	const [keyTtlSeconds, setKeyTtlSeconds] = React.useState('')
+  const [isRollbackOpen, setIsRollbackOpen] = React.useState(false)
+  const [prodRollbackConfirmed, setProdRollbackConfirmed] = React.useState(false)
 
-	const connectionsQuery = useQuery({
-		queryKey: ['connections'],
-		queryFn: async () => unwrapResponse(await window.cachify.listConnections()),
-	})
+  const [searchPattern, setSearchPattern] = React.useState('')
+  const [cursor, setCursor] = React.useState<string | undefined>(undefined)
 
-	const connections = connectionsQuery.data ?? []
+  const [keyName, setKeyName] = React.useState('')
+  const [keyValue, setKeyValue] = React.useState('')
+  const [keyTtlSeconds, setKeyTtlSeconds] = React.useState('')
 
-	const selectedConnection = React.useMemo(
-		() =>
-			connections.find((connection) => connection.id === selectedConnectionId) ??
-			null,
-		[connections, selectedConnectionId],
-	)
+  const connectionsQuery = useQuery({
+    queryKey: ['connections'],
+    queryFn: async () => unwrapResponse(await window.cachify.listConnections()),
+  })
 
-	React.useEffect(() => {
-		if (connections.length === 0) {
-			setSelectedConnectionId(null)
-			return
-		}
+  const connections = connectionsQuery.data ?? []
 
-		if (
-			!selectedConnectionId ||
-			!connections.some((connection) => connection.id === selectedConnectionId)
-		) {
-			setSelectedConnectionId(connections[0].id)
-		}
-	}, [connections, selectedConnectionId, setSelectedConnectionId])
+  const selectedConnection = React.useMemo(
+    () =>
+      connections.find((connection) => connection.id === selectedConnectionId) ??
+      null,
+    [connections, selectedConnectionId],
+  )
 
-	React.useEffect(() => {
-		setCursor(undefined)
-		setSearchPattern('')
-		setSelectedKey(null)
-	}, [selectedConnectionId, setSelectedKey])
+  React.useEffect(() => {
+    if (connections.length === 0) {
+      setSelectedConnectionId(null)
+      return
+    }
 
-	const capabilitiesQuery = useQuery({
-		queryKey: ['capabilities', selectedConnectionId],
-		enabled: Boolean(selectedConnectionId),
-		queryFn: async () => {
-			if (!selectedConnectionId) {
-				throw new Error('Connection is required to load capabilities.')
-			}
+    if (
+      !selectedConnectionId ||
+      !connections.some((connection) => connection.id === selectedConnectionId)
+    ) {
+      setSelectedConnectionId(connections[0].id)
+    }
+  }, [connections, selectedConnectionId, setSelectedConnectionId])
 
-			return unwrapResponse(
-				await window.cachify.getCapabilities({
-					connectionId: selectedConnectionId,
-				}),
-			)
-		},
-	})
+  React.useEffect(() => {
+    setCursor(undefined)
+    setSearchPattern('')
+    setSelectedKey(null)
+  }, [selectedConnectionId, setSelectedKey])
 
-	const capabilities = capabilitiesQuery.data ?? defaultCapabilities
+  const capabilitiesQuery = useQuery({
+    queryKey: ['capabilities', selectedConnectionId],
+    enabled: Boolean(selectedConnectionId),
+    queryFn: async () => {
+      if (!selectedConnectionId) {
+        throw new Error('Connection is required to load capabilities.')
+      }
 
-	const keyListQuery = useQuery({
-		queryKey: ['keys', selectedConnectionId, searchPattern, cursor],
-		enabled: Boolean(selectedConnectionId),
-		queryFn: async () => {
-			if (!selectedConnectionId) {
-				return defaultKeyListResult
-			}
+      return unwrapResponse(
+        await window.cachify.getCapabilities({
+          connectionId: selectedConnectionId,
+        }),
+      )
+    },
+  })
 
-			if (searchPattern.trim().length > 0) {
-				return unwrapResponse(
-					await window.cachify.searchKeys({
-						connectionId: selectedConnectionId,
-						pattern: searchPattern.trim(),
-						cursor,
-						limit: DEFAULT_PAGE_SIZE,
-					}),
-				)
-			}
+  const capabilities = capabilitiesQuery.data ?? defaultCapabilities
 
-			return unwrapResponse(
-				await window.cachify.listKeys({
-					connectionId: selectedConnectionId,
-					cursor,
-					limit: DEFAULT_PAGE_SIZE,
-				}),
-			)
-		},
-	})
+  const keyListQuery = useQuery({
+    queryKey: ['keys', selectedConnectionId, searchPattern, cursor],
+    enabled: Boolean(selectedConnectionId),
+    queryFn: async () => {
+      if (!selectedConnectionId) {
+        return defaultKeyListResult
+      }
 
-	const keyList = keyListQuery.data ?? defaultKeyListResult
+      if (searchPattern.trim().length > 0) {
+        return unwrapResponse(
+          await window.cachify.searchKeys({
+            connectionId: selectedConnectionId,
+            pattern: searchPattern.trim(),
+            cursor,
+            limit: DEFAULT_PAGE_SIZE,
+          }),
+        )
+      }
 
-	const keyDetailQuery = useQuery({
-		queryKey: ['key', selectedConnectionId, selectedKey],
-		enabled: Boolean(selectedConnectionId && selectedKey),
-		queryFn: async (): Promise<KeyValueRecord> => {
-			if (!selectedConnectionId || !selectedKey) {
-				throw new Error('Connection and key are required to load key detail.')
-			}
+      return unwrapResponse(
+        await window.cachify.listKeys({
+          connectionId: selectedConnectionId,
+          cursor,
+          limit: DEFAULT_PAGE_SIZE,
+        }),
+      )
+    },
+  })
 
-			return unwrapResponse(
-				await window.cachify.getKey({
-					connectionId: selectedConnectionId,
-					key: selectedKey,
-				}),
-			)
-		},
-	})
+  const keyList = keyListQuery.data ?? defaultKeyListResult
 
-	const capabilitiesError = getQueryErrorState(capabilitiesQuery.error)
-	const keyListError = getQueryErrorState(keyListQuery.error)
-	const keyDetailError = getQueryErrorState(keyDetailQuery.error)
+  const keyDetailQuery = useQuery({
+    queryKey: ['key', selectedConnectionId, selectedKey],
+    enabled: Boolean(selectedConnectionId && selectedKey),
+    queryFn: async (): Promise<KeyValueRecord> => {
+      if (!selectedConnectionId || !selectedKey) {
+        throw new Error('Connection and key are required to load key detail.')
+      }
 
-	const lastQueryErrorToastRef = React.useRef({
-		capabilities: 0,
-		keyList: 0,
-		keyDetail: 0,
-	})
+      return unwrapResponse(
+        await window.cachify.getKey({
+          connectionId: selectedConnectionId,
+          key: selectedKey,
+        }),
+      )
+    },
+  })
 
-	React.useEffect(() => {
-		if (!capabilitiesError || capabilitiesQuery.errorUpdatedAt === 0) {
-			return
-		}
+  const snapshotsQuery = useQuery({
+    queryKey: ['snapshots', selectedConnectionId, selectedKey],
+    enabled: Boolean(selectedConnectionId && selectedKey && isRollbackOpen),
+    queryFn: async (): Promise<SnapshotRecord[]> => {
+      if (!selectedConnectionId || !selectedKey) {
+        return []
+      }
 
-		if (
-			lastQueryErrorToastRef.current.capabilities ===
-			capabilitiesQuery.errorUpdatedAt
-		) {
-			return
-		}
+      return unwrapResponse(
+        await window.cachify.listSnapshots({
+          connectionId: selectedConnectionId,
+          key: selectedKey,
+          limit: 25,
+        }),
+      )
+    },
+  })
 
-		lastQueryErrorToastRef.current.capabilities = capabilitiesQuery.errorUpdatedAt
-		toast.error(capabilitiesError.message)
-	}, [capabilitiesError, capabilitiesQuery.errorUpdatedAt])
+  const capabilitiesError = getQueryErrorState(capabilitiesQuery.error)
+  const keyListError = getQueryErrorState(keyListQuery.error)
+  const keyDetailError = getQueryErrorState(keyDetailQuery.error)
 
-	React.useEffect(() => {
-		if (!keyListError || keyListQuery.errorUpdatedAt === 0) {
-			return
-		}
+  const lastQueryErrorToastRef = React.useRef({
+    capabilities: 0,
+    keyList: 0,
+    keyDetail: 0,
+  })
 
-		if (lastQueryErrorToastRef.current.keyList === keyListQuery.errorUpdatedAt) {
-			return
-		}
+  React.useEffect(() => {
+    if (!capabilitiesError || capabilitiesQuery.errorUpdatedAt === 0) {
+      return
+    }
 
-		lastQueryErrorToastRef.current.keyList = keyListQuery.errorUpdatedAt
-		toast.error(keyListError.message)
-	}, [keyListError, keyListQuery.errorUpdatedAt])
+    if (
+      lastQueryErrorToastRef.current.capabilities ===
+      capabilitiesQuery.errorUpdatedAt
+    ) {
+      return
+    }
 
-	React.useEffect(() => {
-		if (!keyDetailError || keyDetailQuery.errorUpdatedAt === 0) {
-			return
-		}
+    lastQueryErrorToastRef.current.capabilities = capabilitiesQuery.errorUpdatedAt
+    toast.error(capabilitiesError.message)
+  }, [capabilitiesError, capabilitiesQuery.errorUpdatedAt])
 
-		if (
-			lastQueryErrorToastRef.current.keyDetail === keyDetailQuery.errorUpdatedAt
-		) {
-			return
-		}
+  React.useEffect(() => {
+    if (!keyListError || keyListQuery.errorUpdatedAt === 0) {
+      return
+    }
 
-		lastQueryErrorToastRef.current.keyDetail = keyDetailQuery.errorUpdatedAt
-		toast.error(keyDetailError.message)
-	}, [keyDetailError, keyDetailQuery.errorUpdatedAt])
+    if (lastQueryErrorToastRef.current.keyList === keyListQuery.errorUpdatedAt) {
+      return
+    }
 
-	React.useEffect(() => {
-		if (!selectedKey) {
-			setKeyName('')
-			setKeyValue('')
-			setKeyTtlSeconds('')
-			return
-		}
+    lastQueryErrorToastRef.current.keyList = keyListQuery.errorUpdatedAt
+    toast.error(keyListError.message)
+  }, [keyListError, keyListQuery.errorUpdatedAt])
 
-		setKeyName(selectedKey)
-	}, [selectedKey])
+  React.useEffect(() => {
+    if (!keyDetailError || keyDetailQuery.errorUpdatedAt === 0) {
+      return
+    }
 
-	React.useEffect(() => {
-		if (!keyDetailQuery.data) {
-			return
-		}
+    if (
+      lastQueryErrorToastRef.current.keyDetail === keyDetailQuery.errorUpdatedAt
+    ) {
+      return
+    }
 
-		setKeyValue(keyDetailQuery.data.value ?? '')
-		setKeyTtlSeconds(
-			keyDetailQuery.data.ttlSeconds === null
-				? ''
-				: String(keyDetailQuery.data.ttlSeconds),
-		)
-	}, [keyDetailQuery.data])
+    lastQueryErrorToastRef.current.keyDetail = keyDetailQuery.errorUpdatedAt
+    toast.error(keyDetailError.message)
+  }, [keyDetailError, keyDetailQuery.errorUpdatedAt])
 
-	const deleteConnectionMutation = useMutation({
-		mutationFn: async (connectionId: string) =>
-			unwrapResponse(await window.cachify.deleteConnection({ id: connectionId })),
-		onSuccess: (_result, connectionId) => {
-			queryClient.invalidateQueries({ queryKey: ['connections'] })
+  React.useEffect(() => {
+    if (!selectedKey) {
+      setKeyName('')
+      setKeyValue('')
+      setKeyTtlSeconds('')
+      return
+    }
 
-			if (selectedConnectionId === connectionId) {
-				setSelectedConnectionId(null)
-			}
+    setKeyName(selectedKey)
+  }, [selectedKey])
 
-			toast.success('Connection profile deleted.')
-		},
-		onError: (error) => {
-			toast.error(error instanceof Error ? error.message : 'Delete failed.')
-		},
-	})
+  React.useEffect(() => {
+    if (!keyDetailQuery.data) {
+      return
+    }
 
-	const saveKeyMutation = useMutation({
-		mutationFn: async () => {
-			if (!selectedConnectionId) {
-				throw new Error('Select a connection first.')
-			}
+    setKeyValue(keyDetailQuery.data.value ?? '')
+    setKeyTtlSeconds(
+      keyDetailQuery.data.ttlSeconds === null
+        ? ''
+        : String(keyDetailQuery.data.ttlSeconds),
+    )
+  }, [keyDetailQuery.data])
 
-			const normalizedKey = keyName.trim()
-			if (!normalizedKey) {
-				throw new Error('Key name is required.')
-			}
+  const deleteConnectionMutation = useMutation({
+    mutationFn: async (connectionId: string) =>
+      unwrapResponse(await window.cachify.deleteConnection({ id: connectionId })),
+    onSuccess: (_result, connectionId) => {
+      queryClient.invalidateQueries({ queryKey: ['connections'] })
 
-			const ttl = Number(keyTtlSeconds)
-			const ttlSeconds =
-				keyTtlSeconds.trim().length > 0 && Number.isFinite(ttl) && ttl > 0
-					? ttl
-					: undefined
+      if (selectedConnectionId === connectionId) {
+        setSelectedConnectionId(null)
+      }
 
-			return unwrapResponse(
-				await window.cachify.setKey({
-					connectionId: selectedConnectionId,
-					key: normalizedKey,
-					value: keyValue,
-					ttlSeconds,
-				}),
-			)
-		},
-		onSuccess: async () => {
-			toast.success('Key saved.')
-			await queryClient.invalidateQueries({
-				queryKey: ['keys', selectedConnectionId],
-			})
-			await queryClient.invalidateQueries({
-				queryKey: ['key', selectedConnectionId, keyName.trim()],
-			})
-			setSelectedKey(keyName.trim())
-		},
-		onError: (error) => {
-			toast.error(error instanceof Error ? error.message : 'Save failed.')
-		},
-	})
+      toast.success('Connection profile deleted.')
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Delete failed.')
+    },
+  })
 
-	const deleteKeyMutation = useMutation({
-		mutationFn: async (key: string) => {
-			if (!selectedConnectionId) {
-				throw new Error('Select a connection first.')
-			}
+  const saveKeyMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedConnectionId) {
+        throw new Error('Select a connection first.')
+      }
 
-			return unwrapResponse(
-				await window.cachify.deleteKey({
-					connectionId: selectedConnectionId,
-					key,
-				}),
-			)
-		},
-		onSuccess: async (_result, deletedKey) => {
-			toast.success('Key deleted.')
-			await queryClient.invalidateQueries({
-				queryKey: ['keys', selectedConnectionId],
-			})
-			if (selectedKey === deletedKey) {
-				setSelectedKey(null)
-			}
-		},
-		onError: (error) => {
-			toast.error(error instanceof Error ? error.message : 'Delete failed.')
-		},
-	})
+      const normalizedKey = keyName.trim()
+      if (!normalizedKey) {
+        throw new Error('Key name is required.')
+      }
 
-	const openCreateConnectionDialog = (): void => {
-		setConnectionDialog({
-			open: true,
-			mode: 'create',
-			profile: null,
-		})
-	}
+      const ttl = Number(keyTtlSeconds)
+      const ttlSeconds =
+        keyTtlSeconds.trim().length > 0 && Number.isFinite(ttl) && ttl > 0
+          ? ttl
+          : undefined
 
-	const openEditConnectionDialog = (profile: ConnectionProfile): void => {
-		setConnectionDialog({
-			open: true,
-			mode: 'edit',
-			profile,
-		})
-	}
+      return unwrapResponse(
+        await window.cachify.setKey({
+          connectionId: selectedConnectionId,
+          key: normalizedKey,
+          value: keyValue,
+          ttlSeconds,
+        }),
+      )
+    },
+    onSuccess: async () => {
+      toast.success('Key saved.')
+      await queryClient.invalidateQueries({
+        queryKey: ['keys', selectedConnectionId],
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ['key', selectedConnectionId, keyName.trim()],
+      })
+      await queryClient.invalidateQueries({ queryKey: ['alerts'] })
+      await queryClient.invalidateQueries({
+        queryKey: ['observability-dashboard', selectedConnectionId],
+      })
+      setSelectedKey(keyName.trim())
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Save failed.')
+    },
+  })
 
-	const onConnectionSaved = async (
-		profile: ConnectionProfile,
-	): Promise<void> => {
-		setSelectedConnectionId(profile.id)
-		await queryClient.invalidateQueries({ queryKey: ['connections'] })
-	}
+  const deleteKeyMutation = useMutation({
+    mutationFn: async (args: {
+      key: string
+      guardrailConfirmed?: boolean
+    }) => {
+      if (!selectedConnectionId) {
+        throw new Error('Select a connection first.')
+      }
 
-	const renderOnboarding = () => (
-		<div className='grid min-h-screen place-items-center p-6'>
-			<Card className='w-full max-w-xl'>
-				<CardHeader>
-					<CardTitle>Cachify Studio</CardTitle>
-					<CardDescription>
-						Start by adding your first Redis or Memcached connection profile.
-					</CardDescription>
-				</CardHeader>
-				<CardContent className='flex items-center gap-2'>
-					<Button onClick={openCreateConnectionDialog}>
-						<PlusIcon className='size-3.5' />
-						Add First Connection
-					</Button>
-					<Button variant='outline' onClick={() => setSettingsOpen(true)}>
-						<Settings2Icon className='size-3.5' />
-						Settings
-					</Button>
-				</CardContent>
-			</Card>
-		</div>
-	)
+      return unwrapResponse(
+        await window.cachify.deleteKey({
+          connectionId: selectedConnectionId,
+          key: args.key,
+          guardrailConfirmed: args.guardrailConfirmed,
+        }),
+      )
+    },
+    onSuccess: async (_result, args) => {
+      toast.success('Key deleted.')
+      await queryClient.invalidateQueries({
+        queryKey: ['keys', selectedConnectionId],
+      })
+      await queryClient.invalidateQueries({ queryKey: ['alerts'] })
+      await queryClient.invalidateQueries({
+        queryKey: ['observability-dashboard', selectedConnectionId],
+      })
+      if (selectedKey === args.key) {
+        setSelectedKey(null)
+      }
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Delete failed.')
+    },
+  })
 
-	return (
-		<div className='bg-background text-foreground grid h-screen min-h-screen grid-cols-[300px_1fr]'>
-			<aside className='border-r'>
-				<div className='flex items-center justify-between px-3 py-3'>
-					<div>
-						<p className='text-sm font-semibold'>Connections</p>
-						<p className='text-muted-foreground text-xs'>Redis + Memcached</p>
-					</div>
-					<div className='flex gap-1'>
-						<Button
-							variant='ghost'
-							size='icon-sm'
-							onClick={() => setSettingsOpen(true)}
-						>
-							<Settings2Icon className='size-4' />
-						</Button>
-						<Button
-							variant='ghost'
-							size='icon-sm'
-							onClick={openCreateConnectionDialog}
-						>
-							<PlusIcon className='size-4' />
-						</Button>
-					</div>
-				</div>
-				<Separator />
+  const restoreSnapshotMutation = useMutation({
+    mutationFn: async (snapshotId?: string) => {
+      if (!selectedConnectionId || !selectedKey) {
+        throw new Error('Select a key first.')
+      }
 
-				<div className='no-scrollbar h-[calc(100vh-57px)] space-y-1 overflow-auto p-2'>
-					{connectionsQuery.isLoading && (
-						<p className='text-muted-foreground px-2 py-2 text-xs'>Loading...</p>
-					)}
+      return unwrapResponse(
+        await window.cachify.restoreSnapshot({
+          connectionId: selectedConnectionId,
+          key: selectedKey,
+          snapshotId,
+          guardrailConfirmed: prodRollbackConfirmed,
+        }),
+      )
+    },
+    onSuccess: async () => {
+      toast.success('Snapshot restored.')
+      await queryClient.invalidateQueries({
+        queryKey: ['key', selectedConnectionId, selectedKey],
+      })
+      await queryClient.invalidateQueries({ queryKey: ['alerts'] })
+      await queryClient.invalidateQueries({
+        queryKey: ['observability-dashboard', selectedConnectionId],
+      })
+      setIsRollbackOpen(false)
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Rollback failed.')
+    },
+  })
 
-					{!connectionsQuery.isLoading && connections.length === 0 && (
-						<Card>
-							<CardContent className='space-y-2 p-3'>
-								<p className='text-muted-foreground text-xs'>
-									No connection profiles yet.
-								</p>
-								<Button size='sm' onClick={openCreateConnectionDialog}>
-									Create Profile
-								</Button>
-							</CardContent>
-						</Card>
-					)}
+  const openCreateConnectionDialog = (): void => {
+    setConnectionDialog({
+      open: true,
+      mode: 'create',
+      profile: null,
+    })
+  }
 
-					{connections.map((connection) => {
-						const selected = connection.id === selectedConnectionId
+  const openEditConnectionDialog = (profile: ConnectionProfile): void => {
+    setConnectionDialog({
+      open: true,
+      mode: 'edit',
+      profile,
+    })
+  }
 
-						return (
-							<button
-								key={connection.id}
-								type='button'
-								className={`w-full rounded-none border px-2 py-2 text-left text-xs transition-colors ${
-									selected
-										? 'border-primary bg-primary/10'
-										: 'border-transparent hover:bg-muted/50'
-								}`}
-								onClick={() => setSelectedConnectionId(connection.id)}
-							>
-								<div className='flex items-center justify-between gap-2'>
-									<div className='min-w-0'>
-										<p className='truncate font-medium'>{connection.name}</p>
-										<p className='text-muted-foreground truncate text-xs'>
-											{connection.host}:{connection.port}
-										</p>
-									</div>
-									<div className='flex items-center gap-1'>
-										<Button
-											variant='ghost'
-											size='icon-xs'
-											onClick={(event) => {
-												event.stopPropagation()
-												openEditConnectionDialog(connection)
-											}}
-										>
-											<Edit2Icon className='size-3.5' />
-										</Button>
-										<Button
-											variant='ghost'
-											size='icon-xs'
-											onClick={(event) => {
-												event.stopPropagation()
-												setConnectionIdPendingDelete(connection.id)
-											}}
-										>
-											<Trash2Icon className='size-3.5' />
-										</Button>
-									</div>
-								</div>
+  const onConnectionSaved = async (profile: ConnectionProfile): Promise<void> => {
+    setSelectedConnectionId(profile.id)
+    await queryClient.invalidateQueries({ queryKey: ['connections'] })
+  }
 
-								<div className='mt-2 flex items-center gap-1.5'>
-									<Badge variant='outline'>{connection.engine}</Badge>
-									<Badge variant='outline'>{connection.environment}</Badge>
-									{connection.readOnly && <Badge variant='destructive'>Read-only</Badge>}
-								</div>
-							</button>
-						)
-					})}
-				</div>
-			</aside>
+  const renderOnboarding = () => (
+    <div className='grid min-h-screen place-items-center p-6'>
+      <Card className='w-full max-w-xl'>
+        <CardHeader>
+          <CardTitle>Cachify Studio</CardTitle>
+          <CardDescription>
+            Start by adding your first Redis or Memcached connection profile.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className='flex items-center gap-2'>
+          <Button onClick={openCreateConnectionDialog}>
+            <PlusIcon className='size-3.5' />
+            Add First Connection
+          </Button>
+          <Button variant='outline' onClick={() => setSettingsOpen(true)}>
+            <Settings2Icon className='size-3.5' />
+            Settings
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  )
 
-			<main className='h-screen overflow-hidden p-4'>
-				{connections.length === 0 ? (
-					renderOnboarding()
-				) : selectedConnection ? (
-					<div className='grid h-full min-h-0 grid-rows-[auto_1fr] gap-3'>
-						<Card>
-							<CardContent className='flex items-center justify-between p-3'>
-								<div className='min-w-0'>
-									<div className='flex items-center gap-2'>
-										<ServerIcon className='size-4' />
-										<p className='truncate text-sm font-medium'>
-											{selectedConnection.name}
-										</p>
-										<Badge variant='outline'>{selectedConnection.engine}</Badge>
-										{selectedConnection.readOnly && (
-											<Badge variant='destructive'>
-												<ShieldIcon className='size-3' />
-												Read-only
-											</Badge>
-										)}
-									</div>
-									<p className='text-muted-foreground truncate text-xs'>
-										{selectedConnection.host}:{selectedConnection.port}
-									</p>
-								</div>
-								<div className='text-muted-foreground text-xs'>
-									{selectedConnection.engine === 'memcached' &&
-										'Memcached key search is based on app-indexed keys.'}
-								</div>
-							</CardContent>
-						</Card>
+  return (
+    <div className='bg-background text-foreground grid h-screen min-h-screen grid-cols-[300px_1fr]'>
+      <aside className='border-r'>
+        <div className='flex items-center justify-between px-3 py-3'>
+          <div>
+            <p className='text-sm font-semibold'>Connections</p>
+            <p className='text-muted-foreground text-xs'>Redis + Memcached</p>
+          </div>
+          <div className='flex gap-1'>
+            <Button
+              variant='ghost'
+              size='icon-sm'
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings2Icon className='size-4' />
+            </Button>
+            <Button
+              variant='ghost'
+              size='icon-sm'
+              onClick={openCreateConnectionDialog}
+            >
+              <PlusIcon className='size-4' />
+            </Button>
+          </div>
+        </div>
+        <Separator />
 
-						{capabilitiesError && (
-							<Card>
-								<CardContent className='flex items-center justify-between gap-3 p-3'>
-									<div className='text-xs'>
-										<p className='text-destructive font-medium'>
-											Unable to load provider capabilities.
-										</p>
-										<p className='text-muted-foreground'>
-											{capabilitiesError.message}
-										</p>
-									</div>
-									{capabilitiesError.retryable && (
-										<Button
-											variant='outline'
-											size='sm'
-											onClick={() => {
-												void capabilitiesQuery.refetch()
-											}}
-										>
-											Retry
-										</Button>
-									)}
-								</CardContent>
-							</Card>
-						)}
+        <div className='no-scrollbar h-[calc(100vh-57px)] space-y-1 overflow-auto p-2'>
+          {connectionsQuery.isLoading && (
+            <p className='text-muted-foreground px-2 py-2 text-xs'>Loading...</p>
+          )}
 
-						<div className='grid min-h-0 gap-3 lg:grid-cols-2'>
-							<KeyListCard
-								title='Key Browser'
-								keys={keyList.keys}
-								selectedKey={selectedKey}
-								searchPattern={searchPattern}
-								isLoading={keyListQuery.isLoading}
-								errorMessage={keyListError?.message}
-								isRetryableError={keyListError?.retryable}
-								readOnly={selectedConnection.readOnly}
-								hasNextPage={Boolean(keyList.nextCursor)}
-								onSearchPatternChange={(value) => {
-									setSearchPattern(value)
-									setCursor(undefined)
-								}}
-								onSelectKey={(key) => setSelectedKey(key)}
-								onDeleteKey={(key) => setKeyPendingDelete(key)}
-								onRefresh={() =>
-									queryClient.invalidateQueries({
-										queryKey: ['keys', selectedConnectionId],
-									})
-								}
-								onRetry={() => {
-									void keyListQuery.refetch()
-								}}
-								onLoadNextPage={() => setCursor(keyList.nextCursor)}
-							/>
+          {!connectionsQuery.isLoading && connections.length === 0 && (
+            <Card>
+              <CardContent className='space-y-2 p-3'>
+                <p className='text-muted-foreground text-xs'>
+                  No connection profiles yet.
+                </p>
+                <Button size='sm' onClick={openCreateConnectionDialog}>
+                  Create Profile
+                </Button>
+              </CardContent>
+            </Card>
+          )}
 
-							<KeyDetailCard
-								keyName={keyName}
-								value={keyValue}
-								ttlSeconds={keyTtlSeconds}
-								readOnly={selectedConnection.readOnly}
-								supportsTTL={capabilities.supportsTTL}
-								isLoading={keyDetailQuery.isLoading}
-								errorMessage={keyDetailError?.message}
-								isRetryableError={keyDetailError?.retryable}
-								isExistingKey={Boolean(selectedKey)}
-								onNewKey={() => {
-									setSelectedKey(null)
-									setKeyName('')
-									setKeyValue('')
-									setKeyTtlSeconds('')
-								}}
-								onKeyNameChange={setKeyName}
-								onValueChange={setKeyValue}
-								onTtlChange={setKeyTtlSeconds}
-								onRetry={() => {
-									void keyDetailQuery.refetch()
-								}}
-								onSave={() => saveKeyMutation.mutate()}
-								onDelete={() => {
-									if (selectedKey) {
-										setKeyPendingDelete(selectedKey)
-									}
-								}}
-							/>
-						</div>
-					</div>
-				) : (
-					<div className='grid h-full place-items-center'>
-						<Card>
-							<CardContent className='p-6 text-xs'>
-								Select a connection profile to begin.
-							</CardContent>
-						</Card>
-					</div>
-				)}
-			</main>
+          {connections.map((connection) => {
+            const selected = connection.id === selectedConnectionId
 
-			<ConnectionFormDialog
-				open={connectionDialog.open}
-				mode={connectionDialog.mode}
-				initialProfile={connectionDialog.profile}
-				onOpenChange={(open) =>
-					setConnectionDialog((current) => ({
-						...current,
-						open,
-					}))
-				}
-				onSaved={onConnectionSaved}
-			/>
+            return (
+              <button
+                key={connection.id}
+                type='button'
+                className={`w-full rounded-none border px-2 py-2 text-left text-xs transition-colors ${
+                  selected
+                    ? 'border-primary bg-primary/10'
+                    : 'border-transparent hover:bg-muted/50'
+                }`}
+                onClick={() => setSelectedConnectionId(connection.id)}
+              >
+                <div className='flex items-center justify-between gap-2'>
+                  <div className='min-w-0'>
+                    <p className='truncate font-medium'>{connection.name}</p>
+                    <p className='text-muted-foreground truncate text-xs'>
+                      {connection.host}:{connection.port}
+                    </p>
+                  </div>
+                  <div className='flex items-center gap-1'>
+                    <Button
+                      variant='ghost'
+                      size='icon-xs'
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        openEditConnectionDialog(connection)
+                      }}
+                    >
+                      <Edit2Icon className='size-3.5' />
+                    </Button>
+                    <Button
+                      variant='ghost'
+                      size='icon-xs'
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setConnectionIdPendingDelete(connection.id)
+                      }}
+                    >
+                      <Trash2Icon className='size-3.5' />
+                    </Button>
+                  </div>
+                </div>
 
-			<SettingsPanel open={isSettingsOpen} onOpenChange={setSettingsOpen} />
+                <div className='mt-2 flex items-center gap-1.5'>
+                  <Badge variant='outline'>{connection.engine}</Badge>
+                  <Badge variant='outline'>{connection.environment}</Badge>
+                  {connection.readOnly && <Badge variant='destructive'>Read-only</Badge>}
+                  {connection.forceReadOnly && (
+                    <Badge variant='destructive'>Policy RO</Badge>
+                  )}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </aside>
 
-			<AlertDialog
-				open={Boolean(connectionIdPendingDelete)}
-				onOpenChange={(open) => {
-					if (!open) {
-						setConnectionIdPendingDelete(null)
-					}
-				}}
-			>
-				<AlertDialogContent>
-					<AlertDialogHeader>
-						<AlertDialogTitle>Delete Connection?</AlertDialogTitle>
-						<AlertDialogDescription>
-							This removes the saved profile and keychain secret reference.
-						</AlertDialogDescription>
-					</AlertDialogHeader>
-					<AlertDialogFooter>
-						<AlertDialogCancel>Cancel</AlertDialogCancel>
-						<AlertDialogAction
-							onClick={() => {
-								if (connectionIdPendingDelete) {
-									deleteConnectionMutation.mutate(connectionIdPendingDelete)
-									setConnectionIdPendingDelete(null)
-								}
-							}}
-						>
-							Delete
-						</AlertDialogAction>
-					</AlertDialogFooter>
-				</AlertDialogContent>
-			</AlertDialog>
+      <main className='h-screen overflow-hidden p-4'>
+        {connections.length === 0 ? (
+          renderOnboarding()
+        ) : selectedConnection ? (
+          <div className='grid h-full min-h-0 grid-rows-[auto_1fr] gap-3'>
+            <Card>
+              <CardContent className='flex items-center justify-between p-3'>
+                <div className='min-w-0'>
+                  <div className='flex items-center gap-2'>
+                    <ServerIcon className='size-4' />
+                    <p className='truncate text-sm font-medium'>{selectedConnection.name}</p>
+                    <Badge variant='outline'>{selectedConnection.engine}</Badge>
+                    <Badge variant='outline'>{selectedConnection.environment}</Badge>
+                    {(selectedConnection.readOnly || selectedConnection.forceReadOnly) && (
+                      <Badge variant='destructive'>
+                        <ShieldIcon className='size-3' />
+                        Read-only
+                      </Badge>
+                    )}
+                  </div>
+                  <p className='text-muted-foreground truncate text-xs'>
+                    {selectedConnection.host}:{selectedConnection.port}
+                  </p>
+                </div>
+                <div className='text-muted-foreground text-xs'>
+                  {selectedConnection.engine === 'memcached' &&
+                    'Memcached key search is based on app-indexed keys.'}
+                </div>
+              </CardContent>
+            </Card>
 
-			<AlertDialog
-				open={Boolean(keyPendingDelete)}
-				onOpenChange={(open) => {
-					if (!open) {
-						setKeyPendingDelete(null)
-					}
-				}}
-			>
-				<AlertDialogContent>
-					<AlertDialogHeader>
-						<AlertDialogTitle>Delete Key?</AlertDialogTitle>
-						<AlertDialogDescription>
-							This action cannot be undone and immediately removes the key.
-						</AlertDialogDescription>
-					</AlertDialogHeader>
-					<AlertDialogFooter>
-						<AlertDialogCancel>Cancel</AlertDialogCancel>
-						<AlertDialogAction
-							onClick={() => {
-								if (keyPendingDelete) {
-									deleteKeyMutation.mutate(keyPendingDelete)
-									setKeyPendingDelete(null)
-								}
-							}}
-						>
-							Delete
-						</AlertDialogAction>
-					</AlertDialogFooter>
-				</AlertDialogContent>
-			</AlertDialog>
-		</div>
-	)
+            {capabilitiesError && activeTab === 'workspace' && (
+              <Card>
+                <CardContent className='flex items-center justify-between gap-3 p-3'>
+                  <div className='text-xs'>
+                    <p className='text-destructive font-medium'>
+                      Unable to load provider capabilities.
+                    </p>
+                    <p className='text-muted-foreground'>{capabilitiesError.message}</p>
+                  </div>
+                  {capabilitiesError.retryable && (
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      onClick={() => {
+                        void capabilitiesQuery.refetch()
+                      }}
+                    >
+                      Retry
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            <Tabs
+              value={activeTab}
+              onValueChange={(value) => setActiveTab(value as WorkspaceTab)}
+              className='grid min-h-0 grid-rows-[auto_1fr] gap-3'
+            >
+              <TabsList>
+                <TabsTrigger value='workspace'>Workspace</TabsTrigger>
+                <TabsTrigger value='workflows'>Workflows</TabsTrigger>
+                <TabsTrigger value='observability'>Observability</TabsTrigger>
+                <TabsTrigger value='alerts'>Alerts</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value='workspace' className='min-h-0'>
+                <div className='grid min-h-0 gap-3 lg:grid-cols-2'>
+                  <KeyListCard
+                    title='Key Browser'
+                    keys={keyList.keys}
+                    selectedKey={selectedKey}
+                    searchPattern={searchPattern}
+                    isLoading={keyListQuery.isLoading}
+                    errorMessage={keyListError?.message}
+                    isRetryableError={keyListError?.retryable}
+                    readOnly={Boolean(
+                      selectedConnection.readOnly || selectedConnection.forceReadOnly,
+                    )}
+                    hasNextPage={Boolean(keyList.nextCursor)}
+                    onSearchPatternChange={(value) => {
+                      setSearchPattern(value)
+                      setCursor(undefined)
+                    }}
+                    onSelectKey={(key) => setSelectedKey(key)}
+                    onDeleteKey={(key) => {
+                      setProdDeleteConfirmed(false)
+                      setKeyPendingDelete(key)
+                    }}
+                    onRefresh={() =>
+                      queryClient.invalidateQueries({
+                        queryKey: ['keys', selectedConnectionId],
+                      })
+                    }
+                    onRetry={() => {
+                      void keyListQuery.refetch()
+                    }}
+                    onLoadNextPage={() => setCursor(keyList.nextCursor)}
+                  />
+
+                  <KeyDetailCard
+                    keyName={keyName}
+                    value={keyValue}
+                    ttlSeconds={keyTtlSeconds}
+                    readOnly={Boolean(
+                      selectedConnection.readOnly || selectedConnection.forceReadOnly,
+                    )}
+                    supportsTTL={capabilities.supportsTTL}
+                    isLoading={keyDetailQuery.isLoading}
+                    errorMessage={keyDetailError?.message}
+                    isRetryableError={keyDetailError?.retryable}
+                    isExistingKey={Boolean(selectedKey)}
+                    canRollback={Boolean(selectedKey)}
+                    onRollback={() => {
+                      setProdRollbackConfirmed(false)
+                      setIsRollbackOpen(true)
+                    }}
+                    onNewKey={() => {
+                      setSelectedKey(null)
+                      setKeyName('')
+                      setKeyValue('')
+                      setKeyTtlSeconds('')
+                    }}
+                    onKeyNameChange={setKeyName}
+                    onValueChange={setKeyValue}
+                    onTtlChange={setKeyTtlSeconds}
+                    onRetry={() => {
+                      void keyDetailQuery.refetch()
+                    }}
+                    onSave={() => saveKeyMutation.mutate()}
+                    onDelete={() => {
+                      if (selectedKey) {
+                        setProdDeleteConfirmed(false)
+                        setKeyPendingDelete(selectedKey)
+                      }
+                    }}
+                  />
+                </div>
+              </TabsContent>
+
+              <TabsContent value='workflows' className='min-h-0 overflow-auto'>
+                <WorkflowPanel connection={selectedConnection} />
+              </TabsContent>
+
+              <TabsContent value='observability' className='min-h-0 overflow-auto'>
+                <ObservabilityPanel connection={selectedConnection} />
+              </TabsContent>
+
+              <TabsContent value='alerts' className='min-h-0 overflow-auto'>
+                <AlertsPanel />
+              </TabsContent>
+            </Tabs>
+          </div>
+        ) : (
+          <div className='grid h-full place-items-center'>
+            <Card>
+              <CardContent className='p-6 text-xs'>
+                Select a connection profile to begin.
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </main>
+
+      <ConnectionFormDialog
+        open={connectionDialog.open}
+        mode={connectionDialog.mode}
+        initialProfile={connectionDialog.profile}
+        onOpenChange={(open) =>
+          setConnectionDialog((current) => ({
+            ...current,
+            open,
+          }))
+        }
+        onSaved={onConnectionSaved}
+      />
+
+      <SettingsPanel open={isSettingsOpen} onOpenChange={setSettingsOpen} />
+
+      <AlertDialog
+        open={Boolean(connectionIdPendingDelete)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConnectionIdPendingDelete(null)
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Connection?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the saved profile and keychain secret reference.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (connectionIdPendingDelete) {
+                  deleteConnectionMutation.mutate(connectionIdPendingDelete)
+                  setConnectionIdPendingDelete(null)
+                }
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={Boolean(keyPendingDelete)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setKeyPendingDelete(null)
+            setProdDeleteConfirmed(false)
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Key?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone and immediately removes the key.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {selectedConnection?.environment === 'prod' && (
+            <label className='flex items-center gap-2 text-xs text-destructive'>
+              <Checkbox
+                checked={prodDeleteConfirmed}
+                onCheckedChange={(checked) =>
+                  setProdDeleteConfirmed(Boolean(checked))
+                }
+              />
+              Confirm destructive action on prod connection
+            </label>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (keyPendingDelete) {
+                  deleteKeyMutation.mutate({
+                    key: keyPendingDelete,
+                    guardrailConfirmed: prodDeleteConfirmed,
+                  })
+                  setKeyPendingDelete(null)
+                  setProdDeleteConfirmed(false)
+                }
+              }}
+              disabled={
+                selectedConnection?.environment === 'prod' && !prodDeleteConfirmed
+              }
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={isRollbackOpen} onOpenChange={setIsRollbackOpen}>
+        <DialogContent className='max-w-2xl'>
+          <DialogHeader>
+            <DialogTitle>Rollback Helper</DialogTitle>
+            <DialogDescription>
+              Restore a recent snapshot for the selected key.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedConnection?.environment === 'prod' && (
+            <label className='flex items-center gap-2 text-xs text-destructive'>
+              <Checkbox
+                checked={prodRollbackConfirmed}
+                onCheckedChange={(checked) =>
+                  setProdRollbackConfirmed(Boolean(checked))
+                }
+              />
+              Confirm rollback on prod connection
+            </label>
+          )}
+
+          <div className='max-h-72 space-y-2 overflow-auto'>
+            {snapshotsQuery.isLoading ? (
+              <p className='text-muted-foreground text-xs'>Loading snapshots...</p>
+            ) : (snapshotsQuery.data?.length ?? 0) === 0 ? (
+              <p className='text-muted-foreground text-xs'>
+                No snapshots were found for this key.
+              </p>
+            ) : (
+              snapshotsQuery.data?.map((snapshot) => (
+                <div key={snapshot.id} className='space-y-2 border p-2 text-xs'>
+                  <div className='flex items-center justify-between gap-2'>
+                    <div>
+                      <p className='font-medium'>{snapshot.key}</p>
+                      <p className='text-muted-foreground'>
+                        {new Date(snapshot.capturedAt).toLocaleString()}
+                      </p>
+                    </div>
+                    <Badge variant='outline'>{snapshot.reason}</Badge>
+                  </div>
+                  <div className='text-muted-foreground'>
+                    <p>TTL: {snapshot.ttlSeconds ?? '-'}</p>
+                    <p className='break-all'>hash: {snapshot.redactedValueHash}</p>
+                  </div>
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    onClick={() => restoreSnapshotMutation.mutate(snapshot.id)}
+                    disabled={
+                      restoreSnapshotMutation.isPending ||
+                      (selectedConnection?.environment === 'prod' &&
+                        !prodRollbackConfirmed)
+                    }
+                  >
+                    Restore Snapshot
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
 }

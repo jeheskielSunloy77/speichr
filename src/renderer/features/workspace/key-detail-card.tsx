@@ -23,6 +23,7 @@ type KeyDetailCardProps = {
 	errorMessage?: string
 	isRetryableError?: boolean
 	isExistingKey: boolean
+	canRollback?: boolean
 	onNewKey: () => void
 	onKeyNameChange: (value: string) => void
 	onValueChange: (value: string) => void
@@ -30,6 +31,7 @@ type KeyDetailCardProps = {
 	onRetry?: () => void
 	onSave: () => void
 	onDelete: () => void
+	onRollback?: () => void
 }
 
 export const KeyDetailCard = ({
@@ -42,6 +44,7 @@ export const KeyDetailCard = ({
 	errorMessage,
 	isRetryableError,
 	isExistingKey,
+	canRollback,
 	onNewKey,
 	onKeyNameChange,
 	onValueChange,
@@ -49,6 +52,7 @@ export const KeyDetailCard = ({
 	onRetry,
 	onSave,
 	onDelete,
+	onRollback,
 }: KeyDetailCardProps) => {
 	return (
 		<Card className='h-full'>
@@ -128,6 +132,15 @@ export const KeyDetailCard = ({
 								{isExistingKey ? 'Editing existing key' : 'Preparing new key'}
 							</div>
 							<div className='flex gap-2'>
+								{isExistingKey && canRollback && onRollback && (
+									<Button
+										variant='outline'
+										size='sm'
+										onClick={onRollback}
+									>
+										Rollback
+									</Button>
+								)}
 								{isExistingKey && (
 									<Button
 										variant='destructive'
