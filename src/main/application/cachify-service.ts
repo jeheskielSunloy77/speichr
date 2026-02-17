@@ -87,6 +87,7 @@ import { OperationFailure } from '../domain/operation-failure'
 import { assertConnectionWritable } from '../policies/read-only-policy'
 import type {
   AlertRepository,
+  AlertRuleRepository,
   CacheGateway,
   ConnectionRepository,
   EngineEventIngestor,
@@ -140,6 +141,7 @@ type ServiceDependencies = {
   historyRepository: HistoryRepository
   observabilityRepository: ObservabilityRepository
   alertRepository: AlertRepository
+  alertRuleRepository: AlertRuleRepository
   incidentBundleRepository: IncidentBundleRepository
   notificationPublisher: NotificationPublisher
   engineEventIngestor: EngineEventIngestor
@@ -364,6 +366,28 @@ class InMemoryAlertRepository implements AlertRepository {
   }
 }
 
+class InMemoryAlertRuleRepository implements AlertRuleRepository {
+  private readonly rules = new Map<string, AlertRule>()
+
+  public async list(): Promise<AlertRule[]> {
+    return Array.from(this.rules.values()).sort((left, right) =>
+      right.updatedAt.localeCompare(left.updatedAt),
+    )
+  }
+
+  public async findById(id: string): Promise<AlertRule | null> {
+    return this.rules.get(id) ?? null
+  }
+
+  public async save(rule: AlertRule): Promise<void> {
+    this.rules.set(rule.id, rule)
+  }
+
+  public async delete(id: string): Promise<void> {
+    this.rules.delete(id)
+  }
+}
+
 class InMemoryIncidentBundleRepository implements IncidentBundleRepository {
   private readonly bundles = new Map<string, IncidentBundle>()
 
@@ -411,6 +435,8 @@ export class CachifyService {
 
   private readonly alertRepository: AlertRepository
 
+  private readonly alertRuleRepository: AlertRuleRepository
+
   private readonly incidentBundleRepository: IncidentBundleRepository
 
   private readonly notificationPublisher: NotificationPublisher
@@ -421,6 +447,8 @@ export class CachifyService {
     string,
     Array<{ timestamp: number; durationMs: number; status: OperationStatus }>
   >()
+
+  private readonly alertRuleCooldown = new Map<string, number>()
 
   public constructor(
     private readonly connectionRepository: ConnectionRepository,
@@ -444,6 +472,8 @@ export class CachifyService {
       new InMemoryObservabilityRepository()
     this.alertRepository =
       dependencies?.alertRepository ?? new InMemoryAlertRepository()
+    this.alertRuleRepository =
+      dependencies?.alertRuleRepository ?? new InMemoryAlertRuleRepository()
     this.incidentBundleRepository =
       dependencies?.incidentBundleRepository ?? new InMemoryIncidentBundleRepository()
     this.notificationPublisher =
@@ -1191,6 +1221,11 @@ export class CachifyService {
         source: 'observability',
       })
     }
+
+    await this.evaluateAlertRulesForEvent({
+      profile,
+      timestamp: event.timestamp,
+    })
   }
 
   public async getObservabilityDashboard(
@@ -1714,28 +1749,71 @@ export class CachifyService {
   }
 
   public async listAlertRules(): Promise<AlertRule[]> {
-    return []
+    return this.alertRuleRepository.list()
   }
 
   public async createAlertRule(
     payload: AlertRuleCreateRequest,
   ): Promise<AlertRule> {
-    void payload
-    this.unsupportedV3('alert rule create')
+    const now = new Date().toISOString()
+    const rule: AlertRule = {
+      id: uuidv4(),
+      name: payload.rule.name.trim(),
+      metric: payload.rule.metric,
+      threshold: payload.rule.threshold,
+      lookbackMinutes: payload.rule.lookbackMinutes,
+      severity: payload.rule.severity,
+      connectionId: payload.rule.connectionId,
+      environment: payload.rule.environment,
+      enabled: payload.rule.enabled,
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    await this.alertRuleRepository.save(rule)
+
+    return rule
   }
 
   public async updateAlertRule(
     payload: AlertRuleUpdateRequest,
   ): Promise<AlertRule> {
-    void payload
-    this.unsupportedV3('alert rule update')
+    const existing = await this.alertRuleRepository.findById(payload.id)
+    if (!existing) {
+      throw new OperationFailure(
+        'VALIDATION_ERROR',
+        'Alert rule was not found.',
+        false,
+        { id: payload.id },
+      )
+    }
+
+    const rule: AlertRule = {
+      ...existing,
+      name: payload.rule.name.trim(),
+      metric: payload.rule.metric,
+      threshold: payload.rule.threshold,
+      lookbackMinutes: payload.rule.lookbackMinutes,
+      severity: payload.rule.severity,
+      connectionId: payload.rule.connectionId,
+      environment: payload.rule.environment,
+      enabled: payload.rule.enabled,
+      updatedAt: new Date().toISOString(),
+    }
+
+    await this.alertRuleRepository.save(rule)
+
+    return rule
   }
 
   public async deleteAlertRule(
     payload: AlertRuleDeleteRequest,
   ): Promise<MutationResult> {
-    void payload
-    this.unsupportedV3('alert rule delete')
+    await this.alertRuleRepository.delete(payload.id)
+
+    return {
+      success: true,
+    }
   }
 
   public async listGovernancePolicyPacks(): Promise<GovernancePolicyPack[]> {
@@ -2402,6 +2480,121 @@ export class CachifyService {
         source: 'observability',
       })
     }
+
+    await this.evaluateAlertRulesForEvent({
+      profile: args.profile,
+      timestamp: event.timestamp,
+    })
+  }
+
+  private async evaluateAlertRulesForEvent(args: {
+    profile: ConnectionProfile
+    timestamp: string
+  }): Promise<void> {
+    const rules = await this.alertRuleRepository.list()
+    if (rules.length === 0) {
+      return
+    }
+
+    const eventTime = new Date(args.timestamp).getTime()
+    const nowMs = Number.isNaN(eventTime) ? Date.now() : eventTime
+
+    for (const rule of rules) {
+      if (!rule.enabled) {
+        continue
+      }
+
+      if (rule.connectionId && rule.connectionId !== args.profile.id) {
+        continue
+      }
+
+      if (rule.environment && rule.environment !== args.profile.environment) {
+        continue
+      }
+
+      const cooldownKey = `${rule.id}:${args.profile.id}`
+      const lastTriggeredAt = this.alertRuleCooldown.get(cooldownKey)
+      if (
+        typeof lastTriggeredAt === 'number' &&
+        nowMs - lastTriggeredAt < 60_000
+      ) {
+        continue
+      }
+
+      const lookbackFrom = new Date(
+        nowMs - rule.lookbackMinutes * 60 * 1000,
+      ).toISOString()
+      const value = await this.computeAlertRuleMetric({
+        rule,
+        profile: args.profile,
+        from: lookbackFrom,
+        to: args.timestamp,
+      })
+
+      if (value <= rule.threshold) {
+        continue
+      }
+
+      this.alertRuleCooldown.set(cooldownKey, nowMs)
+
+      await this.emitAlert({
+        connectionId: args.profile.id,
+        environment: args.profile.environment,
+        severity: rule.severity,
+        title: `Alert rule triggered: ${rule.name}`,
+        message: `${rule.metric}=${formatMetricValue(rule.metric, value)} exceeded ${formatMetricValue(rule.metric, rule.threshold)}.`,
+        source: 'observability',
+      })
+    }
+  }
+
+  private async computeAlertRuleMetric(args: {
+    rule: AlertRule
+    profile: ConnectionProfile
+    from: string
+    to: string
+  }): Promise<number> {
+    if (args.rule.metric === 'latencyP95Ms') {
+      const snapshots = await this.observabilityRepository.query({
+        connectionId: args.profile.id,
+        from: args.from,
+        to: args.to,
+        limit: 2000,
+      })
+
+      if (snapshots.length === 0) {
+        return 0
+      }
+
+      const latest = snapshots.sort((left, right) =>
+        right.timestamp.localeCompare(left.timestamp),
+      )[0]
+      return latest.latencyP95Ms
+    }
+
+    const events = await this.historyRepository.query({
+      connectionId: args.profile.id,
+      from: args.from,
+      to: args.to,
+      limit: 5000,
+    })
+
+    if (events.length === 0) {
+      return 0
+    }
+
+    if (args.rule.metric === 'errorRate') {
+      const errorCount = events.filter((event) => event.status === 'error').length
+      return Number((errorCount / events.length).toFixed(3))
+    }
+
+    if (args.rule.metric === 'slowOperationCount') {
+      return events.filter(
+        (event) => event.durationMs >= SLOW_OPERATION_THRESHOLD_MS,
+      ).length
+    }
+
+    return events.filter((event) => event.status === 'error').length
   }
 
   private async emitAlert(args: {
@@ -2631,6 +2824,21 @@ const redactMessage = (message: string): string => {
   }
 
   return `${message.slice(0, 8)}...[redacted]...${message.slice(-8)}`
+}
+
+const formatMetricValue = (
+  metric: AlertRule['metric'],
+  value: number,
+): string => {
+  if (metric === 'errorRate') {
+    return `${(value * 100).toFixed(1)}%`
+  }
+
+  if (metric === 'latencyP95Ms') {
+    return `${Math.round(value)}ms`
+  }
+
+  return String(Math.round(value))
 }
 
 const isBuiltinWorkflowId = (id: string): boolean =>

@@ -13,6 +13,7 @@ import { KeytarSecretStore } from './infrastructure/secrets/keytar-secret-store'
 import { registerIpcHandlers } from './interface-adapters/ipc'
 import {
   SqliteAlertRepository,
+  SqliteAlertRuleRepository,
   createSqliteDatabase,
   SqliteConnectionRepository,
   SqliteHistoryRepository,
@@ -51,6 +52,7 @@ const initializeRuntime = (): RuntimeContext => {
   const historyRepository = new SqliteHistoryRepository(db)
   const observabilityRepository = new SqliteObservabilityRepository(db)
   const alertRepository = new SqliteAlertRepository(db)
+  const alertRuleRepository = new SqliteAlertRuleRepository(db)
   const incidentBundleRepository = new SqliteIncidentBundleRepository(db)
 
   const secretStore =
@@ -77,6 +79,7 @@ const initializeRuntime = (): RuntimeContext => {
       historyRepository,
       observabilityRepository,
       alertRepository,
+      alertRuleRepository,
       incidentBundleRepository,
       notificationPublisher,
       engineEventIngestor,

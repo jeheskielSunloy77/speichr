@@ -670,6 +670,90 @@ describe('CachifyService', () => {
     expect(alerts[0].source).toBe('policy')
   })
 
+  it('supports alert rule CRUD and emits rule-triggered alerts', async () => {
+    const repository = new InMemoryConnectionRepository()
+    const secretStore = new InMemorySecretStore()
+    const memcachedIndex = new InMemoryMemcachedIndexRepository()
+    const setValueMock = vi.fn(
+      async (_profile: ConnectionProfile, _secret: ConnectionSecret, args: {
+        key: string
+        value: string
+        ttlSeconds?: number
+      }) => {
+        if (args.key === 'rule:error') {
+          throw new Error('rule failure')
+        }
+      },
+    )
+    const gateway = createGatewayMock({
+      setValue: setValueMock,
+    })
+
+    const profile: ConnectionProfile = {
+      ...createStoredProfile(),
+      id: 'rule-conn-1',
+      secretRef: 'rule-conn-1',
+    }
+
+    await repository.save(profile)
+    await secretStore.saveSecret(profile.id, { password: 'secret' })
+
+    const service = new CachifyService(
+      repository,
+      secretStore,
+      memcachedIndex,
+      gateway,
+    )
+
+    const created = await service.createAlertRule({
+      rule: {
+        name: 'Error Burst',
+        metric: 'failedOperationCount',
+        threshold: 0,
+        lookbackMinutes: 10,
+        severity: 'critical',
+        connectionId: profile.id,
+        enabled: true,
+      },
+    })
+
+    expect(created.id).toBeTruthy()
+
+    await expect(
+      service.setKey({
+        connectionId: profile.id,
+        key: 'rule:error',
+        value: 'value',
+      }),
+    ).rejects.toBeInstanceOf(OperationFailure)
+
+    const alerts = await service.listAlerts({
+      unreadOnly: false,
+      limit: 50,
+    })
+
+    expect(
+      alerts.some((alert) => alert.title.includes('Alert rule triggered')),
+    ).toBe(true)
+
+    const updated = await service.updateAlertRule({
+      id: created.id,
+      rule: {
+        ...created,
+        enabled: false,
+        name: 'Error Burst Disabled',
+      },
+    })
+
+    expect(updated.enabled).toBe(false)
+
+    await expect(
+      service.deleteAlertRule({
+        id: created.id,
+      }),
+    ).resolves.toEqual({ success: true })
+  })
+
   it('records ingested engine events in history timeline', async () => {
     const repository = new InMemoryConnectionRepository()
     const secretStore = new InMemorySecretStore()
