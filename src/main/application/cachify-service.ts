@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 
 import { v4 as uuidv4 } from 'uuid'
 
@@ -89,6 +92,7 @@ import type {
   EngineEventIngestor,
   EngineTimelineEventInput,
   HistoryRepository,
+  IncidentBundleRepository,
   MemcachedKeyIndexRepository,
   NotificationPublisher,
   ObservabilityRepository,
@@ -136,6 +140,7 @@ type ServiceDependencies = {
   historyRepository: HistoryRepository
   observabilityRepository: ObservabilityRepository
   alertRepository: AlertRepository
+  incidentBundleRepository: IncidentBundleRepository
   notificationPublisher: NotificationPublisher
   engineEventIngestor: EngineEventIngestor
 }
@@ -359,6 +364,20 @@ class InMemoryAlertRepository implements AlertRepository {
   }
 }
 
+class InMemoryIncidentBundleRepository implements IncidentBundleRepository {
+  private readonly bundles = new Map<string, IncidentBundle>()
+
+  public async save(bundle: IncidentBundle): Promise<void> {
+    this.bundles.set(bundle.id, bundle)
+  }
+
+  public async list(limit: number): Promise<IncidentBundle[]> {
+    return Array.from(this.bundles.values())
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .slice(0, limit)
+  }
+}
+
 class NoopNotificationPublisher implements NotificationPublisher {
   public async notify(
     alert: Pick<AlertEvent, 'title' | 'message'>,
@@ -392,6 +411,8 @@ export class CachifyService {
 
   private readonly alertRepository: AlertRepository
 
+  private readonly incidentBundleRepository: IncidentBundleRepository
+
   private readonly notificationPublisher: NotificationPublisher
 
   private readonly engineEventIngestor: EngineEventIngestor
@@ -423,6 +444,8 @@ export class CachifyService {
       new InMemoryObservabilityRepository()
     this.alertRepository =
       dependencies?.alertRepository ?? new InMemoryAlertRepository()
+    this.incidentBundleRepository =
+      dependencies?.incidentBundleRepository ?? new InMemoryIncidentBundleRepository()
     this.notificationPublisher =
       dependencies?.notificationPublisher ?? new NoopNotificationPublisher()
     this.engineEventIngestor =
@@ -1338,66 +1361,187 @@ export class CachifyService {
   public async getKeyspaceActivity(
     payload: KeyspaceActivityRequest,
   ): Promise<KeyspaceActivityView> {
-    const now = new Date().toISOString()
-
-    return {
-      generatedAt: now,
+    const events = await this.historyRepository.query({
+      connectionId: payload.connectionId,
       from: payload.from,
       to: payload.to,
-      topPatterns: [],
-      distribution: [],
+      limit: clampInteger(payload.limit, 1, 5000, 1000),
+    })
+
+    const patternMap = new Map<
+      string,
+      { touchCount: number; errorCount: number; lastTouchedAt?: string }
+    >()
+    for (const event of events) {
+      const pattern = toKeyspacePattern(event.keyOrPattern)
+      const current = patternMap.get(pattern) ?? {
+        touchCount: 0,
+        errorCount: 0,
+      }
+      current.touchCount += 1
+      if (event.status === 'error') {
+        current.errorCount += 1
+      }
+      if (!current.lastTouchedAt || event.timestamp > current.lastTouchedAt) {
+        current.lastTouchedAt = event.timestamp
+      }
+      patternMap.set(pattern, current)
+    }
+
+    const topPatterns: KeyspaceActivityPattern[] = Array.from(
+      patternMap.entries(),
+    )
+      .map(([pattern, aggregate]) => ({
+        pattern,
+        touchCount: aggregate.touchCount,
+        errorCount: aggregate.errorCount,
+        lastTouchedAt: aggregate.lastTouchedAt,
+      }))
+      .sort((left, right) => {
+        if (right.touchCount !== left.touchCount) {
+          return right.touchCount - left.touchCount
+        }
+        if (right.errorCount !== left.errorCount) {
+          return right.errorCount - left.errorCount
+        }
+        return left.pattern.localeCompare(right.pattern)
+      })
+      .slice(0, clampInteger(payload.limit, 1, 500, 50))
+
+    const bucketMap = new Map<string, { touches: number; errors: number }>()
+    const intervalMinutes = clampInteger(payload.intervalMinutes, 1, 1440, 5)
+    for (const event of events) {
+      const bucket = toTimeBucket(event.timestamp, intervalMinutes)
+      const current = bucketMap.get(bucket) ?? {
+        touches: 0,
+        errors: 0,
+      }
+
+      current.touches += 1
+      if (event.status === 'error') {
+        current.errors += 1
+      }
+
+      bucketMap.set(bucket, current)
+    }
+
+    const distribution: KeyspaceActivityPoint[] = Array.from(bucketMap.entries())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([bucket, aggregate]) => ({
+        bucket,
+        touches: aggregate.touches,
+        errors: aggregate.errors,
+      }))
+
+    return {
+      generatedAt: new Date().toISOString(),
+      from: payload.from,
+      to: payload.to,
+      topPatterns,
+      distribution,
     }
   }
 
   public async getFailedOperationDrilldown(
     payload: FailedOperationDrilldownRequest,
   ): Promise<FailedOperationDrilldownResult> {
-    void payload
+    const timeline = await this.historyRepository.query({
+      connectionId: payload.connectionId,
+      from: payload.from,
+      to: payload.to,
+      limit: clampInteger(payload.limit, 1, 5000, 1000),
+    })
+
+    const errorEvents = timeline.filter((event) => event.status === 'error')
+    const selectedEvents = payload.eventId
+      ? errorEvents.filter((event) => event.id === payload.eventId)
+      : errorEvents.slice(0, payload.limit)
+
+    const diagnostics = await Promise.all(
+      selectedEvents.map(async (event): Promise<FailedOperationDiagnostic> => {
+        const eventTime = new Date(event.timestamp).getTime()
+        const relatedEvents = timeline
+          .filter((candidate) => {
+            if (candidate.connectionId !== event.connectionId) {
+              return false
+            }
+
+            if (candidate.keyOrPattern !== event.keyOrPattern) {
+              return false
+            }
+
+            const candidateTime = new Date(candidate.timestamp).getTime()
+            if (Number.isNaN(eventTime) || Number.isNaN(candidateTime)) {
+              return false
+            }
+
+            return Math.abs(candidateTime - eventTime) <= 5 * 60 * 1000
+          })
+          .slice(0, 10)
+
+        const snapshots = await this.observabilityRepository.query({
+          connectionId: event.connectionId,
+          to: event.timestamp,
+          limit: 1,
+        })
+
+        return {
+          event,
+          retryAttempts:
+            typeof event.details?.attempts === 'number'
+              ? Math.max(1, Math.trunc(event.details.attempts))
+              : 1,
+          relatedEvents,
+          latestSnapshot: snapshots[0],
+        }
+      }),
+    )
 
     return {
       generatedAt: new Date().toISOString(),
-      diagnostics: [],
+      diagnostics,
     }
   }
 
   public async comparePeriods(
     payload: ComparePeriodsRequest,
   ): Promise<ComparePeriodsResult> {
-    void payload
+    const baseline = await this.aggregatePeriodMetrics({
+      connectionId: payload.connectionId,
+      from: payload.baselineFrom,
+      to: payload.baselineTo,
+    })
+    const compare = await this.aggregatePeriodMetrics({
+      connectionId: payload.connectionId,
+      from: payload.compareFrom,
+      to: payload.compareTo,
+    })
 
     const metrics: CompareMetricDelta[] = [
-      {
+      buildCompareMetric({
         metric: 'operationCount',
-        baseline: 0,
-        compare: 0,
-        delta: 0,
-        deltaPercent: 0,
-        direction: 'unchanged',
-      },
-      {
+        baseline: baseline.operationCount,
+        compare: compare.operationCount,
+        lowerIsBetter: false,
+      }),
+      buildCompareMetric({
         metric: 'errorRate',
-        baseline: 0,
-        compare: 0,
-        delta: 0,
-        deltaPercent: 0,
-        direction: 'unchanged',
-      },
-      {
+        baseline: baseline.errorRate,
+        compare: compare.errorRate,
+        lowerIsBetter: true,
+      }),
+      buildCompareMetric({
         metric: 'latencyP95Ms',
-        baseline: 0,
-        compare: 0,
-        delta: 0,
-        deltaPercent: 0,
-        direction: 'unchanged',
-      },
-      {
+        baseline: baseline.latencyP95Ms,
+        compare: compare.latencyP95Ms,
+        lowerIsBetter: true,
+      }),
+      buildCompareMetric({
         metric: 'slowOpCount',
-        baseline: 0,
-        compare: 0,
-        delta: 0,
-        deltaPercent: 0,
-        direction: 'unchanged',
-      },
+        baseline: baseline.slowOpCount,
+        compare: compare.slowOpCount,
+        lowerIsBetter: true,
+      }),
     ]
 
     return {
@@ -1411,35 +1555,162 @@ export class CachifyService {
   public async previewIncidentBundle(
     payload: IncidentBundlePreviewRequest,
   ): Promise<IncidentBundlePreview> {
+    const data = await this.collectIncidentBundleData(payload)
+    const timelineCount = data.timeline.length
+    const logCount = data.logs.length
+    const diagnosticCount = data.diagnostics.length
+    const metricCount = data.metrics.length
+    const estimatedSizeBytes =
+      timelineCount * 520 +
+      logCount * 340 +
+      diagnosticCount * 780 +
+      metricCount * 220
+
+    const checksumPreview = createHash('sha256')
+      .update(
+        JSON.stringify({
+          from: payload.from,
+          to: payload.to,
+          connectionIds: data.connectionIds,
+          includes: payload.includes,
+          redactionProfile: payload.redactionProfile,
+          timelineCount,
+          logCount,
+          diagnosticCount,
+          metricCount,
+        }),
+      )
+      .digest('hex')
+
     return {
       from: payload.from,
       to: payload.to,
-      connectionIds: payload.connectionIds ?? [],
+      connectionIds: data.connectionIds,
       includes: payload.includes,
       redactionProfile: payload.redactionProfile,
-      timelineCount: 0,
-      logCount: 0,
-      diagnosticCount: 0,
-      metricCount: 0,
-      estimatedSizeBytes: 0,
-      checksumPreview: createHash('sha256')
-        .update(JSON.stringify(payload))
-        .digest('hex'),
+      timelineCount,
+      logCount,
+      diagnosticCount,
+      metricCount,
+      estimatedSizeBytes,
+      checksumPreview,
     }
   }
 
   public async listIncidentBundles(
     payload: IncidentBundleListRequest,
   ): Promise<IncidentBundle[]> {
-    void payload
-    return []
+    return this.incidentBundleRepository.list(payload.limit)
   }
 
   public async exportIncidentBundle(
     payload: IncidentBundleExportRequest,
   ): Promise<IncidentBundle> {
-    void payload
-    this.unsupportedV3('incident bundle export')
+    const preview = await this.previewIncidentBundle(payload)
+    const data = await this.collectIncidentBundleData(payload)
+    const id = uuidv4()
+    const createdAt = new Date().toISOString()
+    const checksum = createHash('sha256')
+      .update(
+        JSON.stringify({
+          id,
+          createdAt,
+          preview,
+          timeline: data.timeline.map((event) => event.id),
+          logs: data.logs.map((event) => event.id),
+          diagnostics: data.diagnostics.map((item) => item.event.id),
+          metrics: data.metrics.map((snapshot) => snapshot.id),
+        }),
+      )
+      .digest('hex')
+
+    const artifactPath =
+      payload.destinationPath?.trim() ||
+      path.join(os.tmpdir(), `cachify-incident-${id}.json`)
+
+    const artifactPayload = {
+      metadata: {
+        id,
+        createdAt,
+        from: payload.from,
+        to: payload.to,
+        connectionIds: data.connectionIds,
+        includes: payload.includes,
+        redactionProfile: payload.redactionProfile,
+        checksum,
+      },
+      timeline:
+        payload.redactionProfile === 'strict'
+          ? data.timeline.map((event): HistoryEvent => ({
+              ...event,
+              details: undefined,
+              redactedDiff: undefined,
+            }))
+          : data.timeline,
+      logs:
+        payload.redactionProfile === 'strict'
+          ? data.logs.map((event) => ({
+              ...event,
+              message: redactMessage(event.message),
+            }))
+          : data.logs,
+      diagnostics:
+        payload.redactionProfile === 'strict'
+          ? data.diagnostics.map((entry): FailedOperationDiagnostic => ({
+              ...entry,
+              event: {
+                ...entry.event,
+                details: undefined,
+                redactedDiff: undefined,
+              },
+              relatedEvents: entry.relatedEvents.map((related): HistoryEvent => ({
+                ...related,
+                details: undefined,
+                redactedDiff: undefined,
+              })),
+            }))
+          : data.diagnostics,
+      metrics: data.metrics,
+    }
+
+    try {
+      fs.mkdirSync(path.dirname(artifactPath), { recursive: true })
+      fs.writeFileSync(
+        artifactPath,
+        JSON.stringify(artifactPayload, null, 2),
+        'utf8',
+      )
+    } catch (error) {
+      throw new OperationFailure(
+        'INTERNAL_ERROR',
+        'Incident bundle could not be written to disk.',
+        false,
+        {
+          artifactPath,
+          cause: error instanceof Error ? error.message : 'unknown',
+        },
+      )
+    }
+
+    const bundle: IncidentBundle = {
+      id,
+      createdAt,
+      from: payload.from,
+      to: payload.to,
+      connectionIds: data.connectionIds,
+      includes: payload.includes,
+      redactionProfile: payload.redactionProfile,
+      checksum,
+      artifactPath,
+      timelineCount: preview.timelineCount,
+      logCount: preview.logCount,
+      diagnosticCount: preview.diagnosticCount,
+      metricCount: preview.metricCount,
+    }
+
+    await this.incidentBundleRepository.save(bundle)
+
+    return bundle
   }
 
   public async listAlertRules(): Promise<AlertRule[]> {
@@ -1560,6 +1831,171 @@ export class CachifyService {
       generatedAt: new Date().toISOString(),
       datasets: [],
       totalBytes: 0,
+    }
+  }
+
+  private async aggregatePeriodMetrics(args: {
+    connectionId?: string
+    from: string
+    to: string
+  }): Promise<{
+    operationCount: number
+    errorRate: number
+    latencyP95Ms: number
+    slowOpCount: number
+  }> {
+    const events = await this.historyRepository.query({
+      connectionId: args.connectionId,
+      from: args.from,
+      to: args.to,
+      limit: 5000,
+    })
+    const operationCount = events.length
+    const errorCount = events.filter((event) => event.status === 'error').length
+    const slowOpCount = events.filter(
+      (event) => event.durationMs >= SLOW_OPERATION_THRESHOLD_MS,
+    ).length
+    const sortedDurations = events
+      .map((event) => event.durationMs)
+      .sort((left, right) => left - right)
+
+    return {
+      operationCount,
+      errorRate:
+        operationCount === 0
+          ? 0
+          : Number((errorCount / operationCount).toFixed(3)),
+      latencyP95Ms: percentile(sortedDurations, 0.95),
+      slowOpCount,
+    }
+  }
+
+  private async collectIncidentBundleData(args: {
+    from: string
+    to: string
+    connectionIds?: string[]
+    includes: IncidentBundle['includes']
+  }): Promise<{
+    connectionIds: string[]
+    timeline: HistoryEvent[]
+    logs: AlertEvent[]
+    diagnostics: FailedOperationDiagnostic[]
+    metrics: ObservabilitySnapshot[]
+  }> {
+    const include = new Set(args.includes)
+    const connectionFilter =
+      args.connectionIds && args.connectionIds.length > 0
+        ? new Set(args.connectionIds)
+        : null
+    const limit = 5000
+
+    const shouldFilterConnection = (
+      connectionId?: string,
+    ): connectionId is string => {
+      if (!connectionFilter) {
+        return true
+      }
+
+      if (!connectionId) {
+        return false
+      }
+
+      return connectionFilter.has(connectionId)
+    }
+
+    const baseTimeline = await this.historyRepository.query({
+      from: args.from,
+      to: args.to,
+      limit,
+    })
+    const scopedTimeline = baseTimeline.filter((event) =>
+      shouldFilterConnection(event.connectionId),
+    )
+
+    const alerts = await this.alertRepository.list({
+      unreadOnly: false,
+      limit,
+    })
+    const scopedLogs = alerts.filter((event) => {
+      if (event.createdAt < args.from || event.createdAt > args.to) {
+        return false
+      }
+
+      return shouldFilterConnection(event.connectionId)
+    })
+
+    const snapshots = await this.observabilityRepository.query({
+      from: args.from,
+      to: args.to,
+      limit,
+    })
+    const scopedSnapshots = snapshots.filter((snapshot) =>
+      shouldFilterConnection(snapshot.connectionId),
+    )
+
+    const snapshotsByConnection = new Map<string, ObservabilitySnapshot[]>()
+    for (const snapshot of scopedSnapshots) {
+      const list = snapshotsByConnection.get(snapshot.connectionId) ?? []
+      list.push(snapshot)
+      snapshotsByConnection.set(snapshot.connectionId, list)
+    }
+
+    const diagnostics: FailedOperationDiagnostic[] = scopedTimeline
+      .filter((event) => event.status === 'error')
+      .map((event) => {
+        const eventTime = new Date(event.timestamp).getTime()
+        const relatedEvents = scopedTimeline
+          .filter((candidate) => {
+            if (candidate.connectionId !== event.connectionId) {
+              return false
+            }
+
+            if (candidate.keyOrPattern !== event.keyOrPattern) {
+              return false
+            }
+
+            const candidateTime = new Date(candidate.timestamp).getTime()
+            if (Number.isNaN(eventTime) || Number.isNaN(candidateTime)) {
+              return false
+            }
+
+            return Math.abs(candidateTime - eventTime) <= 5 * 60 * 1000
+          })
+          .slice(0, 10)
+
+        const latestSnapshot = (snapshotsByConnection.get(event.connectionId) ?? [])
+          .filter((snapshot) => snapshot.timestamp <= event.timestamp)
+          .sort((left, right) => right.timestamp.localeCompare(left.timestamp))[0]
+
+        return {
+          event,
+          retryAttempts:
+            typeof event.details?.attempts === 'number'
+              ? Math.max(1, Math.trunc(event.details.attempts))
+              : 1,
+          relatedEvents,
+          latestSnapshot,
+        }
+      })
+
+    const resolvedConnectionIds = connectionFilter
+      ? Array.from(connectionFilter)
+      : Array.from(
+          new Set([
+            ...scopedTimeline.map((event) => event.connectionId),
+            ...scopedLogs
+              .map((event) => event.connectionId)
+              .filter((value): value is string => Boolean(value)),
+            ...scopedSnapshots.map((snapshot) => snapshot.connectionId),
+          ]),
+        )
+
+    return {
+      connectionIds: resolvedConnectionIds,
+      timeline: include.has('timeline') ? scopedTimeline : [],
+      logs: include.has('logs') ? scopedLogs : [],
+      diagnostics: include.has('diagnostics') ? diagnostics : [],
+      metrics: include.has('metrics') ? scopedSnapshots : [],
     }
   }
 
@@ -2144,6 +2580,57 @@ export class CachifyService {
       items,
     }
   }
+}
+
+const buildCompareMetric = (args: {
+  metric: CompareMetricDelta['metric']
+  baseline: number
+  compare: number
+  lowerIsBetter: boolean
+}): CompareMetricDelta => {
+  const delta = Number((args.compare - args.baseline).toFixed(3))
+  const deltaPercent =
+    args.baseline === 0
+      ? args.compare === 0
+        ? 0
+        : null
+      : Number(((args.compare - args.baseline) / args.baseline).toFixed(3))
+
+  let direction: CompareMetricDelta['direction'] = 'unchanged'
+  if (delta !== 0) {
+    const improved = args.lowerIsBetter ? delta < 0 : delta > 0
+    direction = improved ? 'improved' : 'regressed'
+  }
+
+  return {
+    metric: args.metric,
+    baseline: Number(args.baseline.toFixed(3)),
+    compare: Number(args.compare.toFixed(3)),
+    delta,
+    deltaPercent,
+    direction,
+  }
+}
+
+const toKeyspacePattern = (keyOrPattern: string): string => {
+  if (keyOrPattern.includes('*')) {
+    return keyOrPattern
+  }
+
+  const segments = keyOrPattern.split(':').filter((segment) => segment.length > 0)
+  if (segments.length <= 1) {
+    return keyOrPattern
+  }
+
+  return `${segments[0]}:*`
+}
+
+const redactMessage = (message: string): string => {
+  if (message.length <= 24) {
+    return '[redacted]'
+  }
+
+  return `${message.slice(0, 8)}...[redacted]...${message.slice(-8)}`
 }
 
 const isBuiltinWorkflowId = (id: string): boolean =>

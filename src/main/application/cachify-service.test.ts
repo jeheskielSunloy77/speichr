@@ -1,3 +1,7 @@
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
 import { describe, expect, it, vi } from 'vitest'
 
 import type {
@@ -745,5 +749,172 @@ describe('CachifyService', () => {
 
     expect(startMock).toHaveBeenCalledTimes(1)
     expect(stopMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('builds keyspace activity and compare-period analytics from history', async () => {
+    const repository = new InMemoryConnectionRepository()
+    const secretStore = new InMemorySecretStore()
+    const memcachedIndex = new InMemoryMemcachedIndexRepository()
+    const setValueMock = vi.fn(
+      async (_profile: ConnectionProfile, _secret: ConnectionSecret, args: {
+        key: string
+        value: string
+        ttlSeconds?: number
+      }) => {
+        if (args.key === 'user:error') {
+          throw new Error('simulated write failure')
+        }
+      },
+    )
+    const gateway = createGatewayMock({
+      setValue: setValueMock,
+    })
+
+    const profile: ConnectionProfile = {
+      ...createStoredProfile(),
+      id: 'analytics-1',
+      secretRef: 'analytics-1',
+    }
+
+    await repository.save(profile)
+    await secretStore.saveSecret(profile.id, { password: 'secret' })
+
+    const service = new CachifyService(
+      repository,
+      secretStore,
+      memcachedIndex,
+      gateway,
+    )
+
+    await service.setKey({
+      connectionId: profile.id,
+      key: 'user:1',
+      value: 'value-1',
+    })
+    await service.setKey({
+      connectionId: profile.id,
+      key: 'user:2',
+      value: 'value-2',
+    })
+    await expect(
+      service.setKey({
+        connectionId: profile.id,
+        key: 'user:error',
+        value: 'value-3',
+      }),
+    ).rejects.toBeInstanceOf(OperationFailure)
+
+    const from = new Date(Date.now() - 60_000).toISOString()
+    const to = new Date(Date.now() + 60_000).toISOString()
+
+    const keyspace = await service.getKeyspaceActivity({
+      connectionId: profile.id,
+      from,
+      to,
+      intervalMinutes: 1,
+      limit: 10,
+    })
+
+    expect(keyspace.topPatterns.length).toBeGreaterThan(0)
+    expect(keyspace.topPatterns[0].pattern).toBe('user:*')
+    expect(keyspace.distribution.length).toBeGreaterThan(0)
+
+    const compare = await service.comparePeriods({
+      connectionId: profile.id,
+      baselineFrom: '2020-01-01T00:00:00.000Z',
+      baselineTo: '2020-01-01T00:01:00.000Z',
+      compareFrom: from,
+      compareTo: to,
+    })
+
+    const operationMetric = compare.metrics.find(
+      (metric) => metric.metric === 'operationCount',
+    )
+    const errorRateMetric = compare.metrics.find(
+      (metric) => metric.metric === 'errorRate',
+    )
+
+    expect(operationMetric?.compare).toBeGreaterThan(0)
+    expect(errorRateMetric?.compare).toBeGreaterThan(0)
+  })
+
+  it('previews and exports incident bundles then lists persisted bundles', async () => {
+    const repository = new InMemoryConnectionRepository()
+    const secretStore = new InMemorySecretStore()
+    const memcachedIndex = new InMemoryMemcachedIndexRepository()
+    const gateway = createGatewayMock()
+
+    const profile: ConnectionProfile = {
+      ...createStoredProfile(),
+      id: 'incident-conn-1',
+      secretRef: 'incident-conn-1',
+    }
+
+    await repository.save(profile)
+    await secretStore.saveSecret(profile.id, { password: 'secret' })
+
+    const service = new CachifyService(
+      repository,
+      secretStore,
+      memcachedIndex,
+      gateway,
+    )
+
+    await service.setKey({
+      connectionId: profile.id,
+      key: 'incident:key',
+      value: 'value',
+    })
+    await service.ingestEngineEvent({
+      connectionId: profile.id,
+      action: 'engine.failure',
+      keyOrPattern: 'incident:key',
+      durationMs: 900,
+      status: 'error',
+    })
+
+    const from = new Date(Date.now() - 60_000).toISOString()
+    const to = new Date(Date.now() + 60_000).toISOString()
+
+    const preview = await service.previewIncidentBundle({
+      from,
+      to,
+      includes: ['timeline', 'logs', 'diagnostics', 'metrics'],
+      redactionProfile: 'default',
+      connectionIds: [profile.id],
+    })
+
+    expect(preview.timelineCount).toBeGreaterThan(0)
+    expect(preview.diagnosticCount).toBeGreaterThan(0)
+    expect(preview.checksumPreview).toBeTruthy()
+
+    const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'cachify-incident-'))
+    const destinationPath = path.join(tempDirectory, 'bundle.json')
+
+    const exported = await service.exportIncidentBundle({
+      from,
+      to,
+      includes: ['timeline', 'logs', 'diagnostics', 'metrics'],
+      redactionProfile: 'strict',
+      connectionIds: [profile.id],
+      destinationPath,
+    })
+
+    expect(exported.artifactPath).toBe(destinationPath)
+    expect(fs.existsSync(destinationPath)).toBe(true)
+
+    const bundles = await service.listIncidentBundles({
+      limit: 10,
+    })
+
+    expect(bundles.length).toBe(1)
+    expect(bundles[0].checksum).toBe(exported.checksum)
+
+    const artifact = JSON.parse(fs.readFileSync(destinationPath, 'utf8')) as {
+      metadata: { redactionProfile: string }
+    }
+    expect(artifact.metadata.redactionProfile).toBe('strict')
+
+    fs.rmSync(tempDirectory, { recursive: true, force: true })
   })
 })

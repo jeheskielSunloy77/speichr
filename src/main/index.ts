@@ -16,6 +16,7 @@ import {
   createSqliteDatabase,
   SqliteConnectionRepository,
   SqliteHistoryRepository,
+  SqliteIncidentBundleRepository,
   SqliteMemcachedKeyIndexRepository,
   SqliteObservabilityRepository,
   SqliteSnapshotRepository,
@@ -50,6 +51,7 @@ const initializeRuntime = (): RuntimeContext => {
   const historyRepository = new SqliteHistoryRepository(db)
   const observabilityRepository = new SqliteObservabilityRepository(db)
   const alertRepository = new SqliteAlertRepository(db)
+  const incidentBundleRepository = new SqliteIncidentBundleRepository(db)
 
   const secretStore =
     process.env.CACHIFY_SECRET_STORE === 'memory'
@@ -75,6 +77,7 @@ const initializeRuntime = (): RuntimeContext => {
       historyRepository,
       observabilityRepository,
       alertRepository,
+      incidentBundleRepository,
       notificationPublisher,
       engineEventIngestor,
     },
