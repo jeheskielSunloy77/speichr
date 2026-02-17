@@ -6,7 +6,7 @@ Initial release definition. No prior product version exists.
 ## Document Metadata
 - Product: Cachify Studio
 - Document type: Version PRD (V1)
-- Version: 1.0
+- Version: 1.1
 - Status: Draft
 - Last updated: 2026-02-17
 
@@ -78,6 +78,8 @@ Initial release definition. No prior product version exists.
 6. FR-V1-006: App must delete single keys/items with confirmation.
 7. FR-V1-007: Read-only connections must block write and delete actions.
 8. FR-V1-008: App must support dark and light theme switching.
+9. FR-V1-009: V1 delivery must include the repository restructuring process toward the canonical `Project Structure Shape` defined in `PRD.md`, with explicit migration checkpoints documented and validated.
+10. FR-V1-010: V1 delivery must install and lock all required dependencies for V1, V2, and V3 planned capabilities so the project is dependency-ready for phased implementation.
 
 ### Edge Cases
 1. Invalid host, TLS, or auth credentials.
@@ -133,11 +135,17 @@ Initial release definition. No prior product version exists.
 ### Compatibility Scenarios
 1. Redis and Memcached both pass baseline connect/read/search/write/delete flows.
 
+### Delivery/Scaffold Scenarios
+1. Restructuring process checkpoints are documented and validated against the target `Project Structure Shape` in `PRD.md`.
+2. Dependency installation completes successfully for all V1, V2, and V3 planned capabilities with no unresolved required packages.
+
 ### V1 Exit Criteria
 1. All required V1 tests pass.
 2. No P1/P2 security defects for credential handling.
 3. No critical crashes in core operation paths.
 4. Documentation links to master PRD sections are complete.
+5. Repository restructuring process for V1 is documented and accepted against `PRD.md` target structure checkpoints.
+6. Required dependencies for V1, V2, and V3 are installed and locked in project manifests/lockfile.
 
 ## Out of Scope for V1 (Deferred)
 1. Environment guardrails on `prod` tags.
@@ -157,4 +165,5 @@ Initial release definition. No prior product version exists.
 ## Change Log
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-02-17 | 1.1 | Codex | Added restructuring-process and cross-version dependency-installation requirements plus matching V1 success/exit criteria. |
 | 2026-02-17 | 1.0 | Codex | Created V1 PRD with MVP scope, flows, API subset, tests, and deferrals. |

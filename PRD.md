@@ -4,7 +4,7 @@
 
 - Product: Cachify Studio
 - Document type: Master PRD
-- Version: 1.4
+- Version: 1.5
 - Status: Draft
 - Last updated: 2026-02-17
 - Owners: Product + Engineering
@@ -47,6 +47,90 @@ Redis and Memcached workflows are often split across CLI tools, scripts, and one
 5. Storage model: local-only metadata persistence; no centralized backend.
 6. Cache engines: Redis and Memcached are first-class targets in all versions.
 7. Packaging: Linux, macOS, and Windows.
+
+## Project Structure Shape
+
+### Canonical Target Structure (Normative)
+
+```text
+.
+├── PRD.md
+├── PRD-V1.md
+├── PRD-V2.md
+├── PRD-V3.md
+├── components.json
+├── package.json
+├── forge.config.ts
+├── vite.main.config.ts
+├── vite.preload.config.ts
+├── vite.renderer.config.ts
+└── src/
+    ├── main/
+    │   ├── domain/               # Entities, value objects, domain policies/events
+    │   ├── application/          # Use-cases, repository/provider interfaces
+    │   ├── interface-adapters/   # IPC handlers, DTO mappers, presenters for IPC
+    │   ├── infrastructure/       # SQLite/keychain/cache adapters, scheduler, notifications
+    │   ├── policies/             # Environment and guardrail policy enforcement
+    │   ├── persistence/          # Migration runner, schema, repository implementations
+    │   └── index.ts              # Electron main bootstrap/composition root
+    ├── preload/
+    │   ├── bridge/               # Typed IPC bridge surface only
+    │   ├── schemas/              # Runtime schema validation for IPC payloads
+    │   └── index.ts
+    ├── renderer/
+    │   ├── app/                  # App shell/routes/composition
+    │   ├── features/             # Feature modules (connections, keys, workflows, etc.)
+    │   ├── state/                # React Query + Zustand stores/selectors
+    │   ├── presenters/           # DTO to view-model mapping
+    │   ├── components/           # Renderer-specific shared UI composition
+    │   ├── pages/                # Screen-level containers
+    │   └── index.tsx
+    └── shared/
+        ├── contracts/            # Cross-process contracts and DTO types
+        ├── ipc/                  # IPC envelope definitions and channel maps
+        └── schemas/              # Shared validation schemas and codecs
+```
+
+Ownership notes:
+1. `src/main/**` owns domain/application/infrastructure execution and policy enforcement in the main process.
+2. `src/preload/**` is limited to typed IPC bridge code and payload validation support.
+3. `src/renderer/**` owns React UI composition, feature screens, and UI/query/session state.
+4. `src/shared/**` contains only cross-process contracts and schema artifacts; no infrastructure adapters or Electron runtime wiring.
+
+### Current Scaffold Snapshot (2026-02-17)
+
+```text
+.
+├── PRD.md
+├── PRD-V1.md
+├── PRD-V2.md
+├── PRD-V3.md
+├── components.json
+├── package.json
+├── forge.config.ts
+├── vite.main.config.ts
+├── vite.preload.config.ts
+├── vite.renderer.config.ts
+└── src/
+    ├── main.ts
+    ├── preload.ts
+    ├── renderer.tsx
+    ├── App.tsx
+    ├── index.css
+    ├── components/
+    │   └── ui/*
+    ├── hooks/
+    │   └── use-mobile.ts
+    └── lib/
+        └── utils.ts
+```
+
+### Conformance Rules
+
+1. The canonical target structure in this section is normative for future implementation milestones.
+2. The current scaffold snapshot is transitional and can be incrementally migrated to the target shape.
+3. If shadcn/ui component paths or aliases move, `components.json` must be updated in the same change set.
+4. Renderer modules must not directly import infrastructure adapters or main-process runtime code.
 
 ## Clean Architecture Blueprint
 
@@ -687,6 +771,7 @@ Contract ownership and mandatory tests:
 16. Fast gate includes unit and contract tests; full suite adds integration and end-to-end/smoke tests.
 17. Bun is the default JavaScript runtime/package manager for local and CI scripts.
 18. Vitest remains the default test runner unless a future PRD revision explicitly changes this policy.
+19. Target structure in `Project Structure Shape` is the canonical repository layout baseline.
 
 ## Document Governance Rules
 
@@ -711,6 +796,7 @@ Contract ownership and mandatory tests:
 
 | Date       | Version | Author | Change                                                                                                                                                                                         |
 | ---------- | ------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-02-17 | 1.5     | Codex  | Added `Project Structure Shape` with canonical target tree, current scaffold snapshot, and conformance rules for structure migration and `components.json` alias alignment.                    |
 | 2026-02-17 | 1.4     | Codex  | Updated stack policy to adopt Bun as runtime/package manager while retaining Vitest as the canonical test runner; aligned scaffold, test policy, and assumptions.                              |
 | 2026-02-17 | 1.3     | Codex  | Added AI-agent implementation workflow with current-branch-only commits, minimum 8 milestone commits per version, detailed Conventional Commit requirements, and unpushed completion defaults. |
 | 2026-02-17 | 1.2     | Codex  | Locked CI to GitHub Actions and added two-tier CLI/CI test execution policy (fast gate + full suite).                                                                                          |
