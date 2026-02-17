@@ -52,6 +52,34 @@ describe('commandEnvelopeSchema', () => {
       }),
     ).toThrowError()
   })
+
+  it('accepts connection tests with optional connectionId', () => {
+    const parsed = commandEnvelopeSchema.parse({
+      command: 'connection.test',
+      correlationId: 'abc-123',
+      payload: {
+        connectionId: 'conn-1',
+        profile: {
+          name: 'local redis',
+          engine: 'redis',
+          host: '127.0.0.1',
+          port: 6379,
+          dbIndex: 0,
+          tlsEnabled: false,
+          environment: 'dev',
+          tags: ['local'],
+          readOnly: false,
+          timeoutMs: 5000,
+        },
+        secret: {},
+      },
+    })
+
+    expect(parsed.command).toBe('connection.test')
+    expect((parsed.payload as { connectionId?: string }).connectionId).toBe(
+      'conn-1',
+    )
+  })
 })
 
 describe('queryEnvelopeSchema', () => {
@@ -66,5 +94,21 @@ describe('queryEnvelopeSchema', () => {
     })
 
     expect(parsed.query).toBe('key.get')
+  })
+
+  it('accepts key search with optional cursor', () => {
+    const parsed = queryEnvelopeSchema.parse({
+      query: 'key.search',
+      correlationId: 'xyz-2',
+      payload: {
+        connectionId: 'conn-1',
+        pattern: 'user:*',
+        cursor: '42',
+        limit: 100,
+      },
+    })
+
+    expect(parsed.query).toBe('key.search')
+    expect((parsed.payload as { cursor?: string }).cursor).toBe('42')
   })
 })

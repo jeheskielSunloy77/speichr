@@ -72,10 +72,37 @@ export class CachifyService {
       updatedAt: now,
     }
 
-    await this.connectionRepository.save(profile)
-    await this.secretStore.saveSecret(profile.id, payload.secret)
+    let profileSaved = false
+    try {
+      await this.connectionRepository.save(profile)
+      profileSaved = true
+      await this.secretStore.saveSecret(profile.id, payload.secret)
 
-    return profile
+      return profile
+    } catch (error) {
+      let rollbackSucceeded = false
+
+      if (profileSaved) {
+        try {
+          await this.connectionRepository.delete(profile.id)
+          rollbackSucceeded = true
+        } catch (rollbackError) {
+          void rollbackError
+        }
+      }
+
+      throw new OperationFailure(
+        'INTERNAL_ERROR',
+        'Connection profile could not be saved securely. Please try again.',
+        false,
+        {
+          rollbackAttempted: profileSaved,
+          rollbackSucceeded: profileSaved ? rollbackSucceeded : undefined,
+          stage: profileSaved ? 'secret-store' : 'metadata-store',
+          cause: error instanceof Error ? error.message : 'unknown',
+        },
+      )
+    }
   }
 
   public async updateConnection(
@@ -125,13 +152,14 @@ export class CachifyService {
     payload: ConnectionTestRequest,
   ): Promise<{ latencyMs: number; capabilities: ProviderCapabilities }> {
     const normalizedProfile = normalizeDraft(payload.profile)
+    const resolvedSecret = await this.resolveTestSecret(payload)
 
     let lastError: unknown
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         return await this.cacheGateway.testConnection(
           normalizedProfile,
-          payload.secret,
+          resolvedSecret,
         )
       } catch (error) {
         lastError = error
@@ -174,6 +202,7 @@ export class CachifyService {
 
     return this.cacheGateway.searchKeys(profile, secret, {
       pattern: payload.pattern,
+      cursor: payload.cursor,
       limit: payload.limit,
     })
   }
@@ -245,6 +274,19 @@ export class CachifyService {
       secret,
     }
   }
+
+  private async resolveTestSecret(
+    payload: ConnectionTestRequest,
+  ): Promise<ConnectionCreateRequest['secret']> {
+    if (!payload.connectionId) {
+      return payload.secret
+    }
+
+    await this.requireConnection(payload.connectionId)
+    const storedSecret = await this.secretStore.getSecret(payload.connectionId)
+
+    return mergeSecretOverlay(storedSecret, payload.secret)
+  }
 }
 
 const normalizeDraft = (
@@ -272,3 +314,18 @@ const normalizeTags = (tags: string[]): string[] => {
 
   return Array.from(new Set(normalized))
 }
+
+const mergeSecretOverlay = (
+  baseSecret: ConnectionCreateRequest['secret'],
+  secretOverlay: ConnectionCreateRequest['secret'],
+): ConnectionCreateRequest['secret'] => ({
+  username:
+    secretOverlay.username === undefined
+      ? baseSecret.username
+      : secretOverlay.username,
+  password:
+    secretOverlay.password === undefined
+      ? baseSecret.password
+      : secretOverlay.password,
+  token: secretOverlay.token === undefined ? baseSecret.token : secretOverlay.token,
+})

@@ -86,7 +86,7 @@ export class DefaultCacheGateway implements CacheGateway {
   public async searchKeys(
     profile: ConnectionProfile,
     secret: ConnectionSecret,
-    args: { pattern: string; limit: number },
+    args: { pattern: string; limit: number; cursor?: string },
   ): Promise<KeyListResult> {
     if (profile.engine === 'redis') {
       return this.redisSearchKeys(profile, secret, args)
@@ -96,11 +96,16 @@ export class DefaultCacheGateway implements CacheGateway {
       profile.id,
       args.pattern,
       args.limit,
+      args.cursor,
     )
+    const nextCursor =
+      keys.length === args.limit && keys.length > 0
+        ? keys[keys.length - 1]
+        : undefined
 
     return {
       keys,
-      nextCursor: undefined,
+      nextCursor,
     }
   }
 
@@ -251,7 +256,7 @@ export class DefaultCacheGateway implements CacheGateway {
   private async redisSearchKeys(
     profile: ConnectionProfile,
     secret: ConnectionSecret,
-    args: { pattern: string; limit: number },
+    args: { pattern: string; limit: number; cursor?: string },
   ): Promise<KeyListResult> {
     const client = this.createRedisClient(profile, secret)
     const keySet = new Set<string>()
@@ -259,7 +264,7 @@ export class DefaultCacheGateway implements CacheGateway {
     try {
       await client.connect()
 
-      let cursor = '0'
+      let cursor = args.cursor ?? '0'
       let loopCount = 0
 
       do {
@@ -280,7 +285,7 @@ export class DefaultCacheGateway implements CacheGateway {
 
       return {
         keys: Array.from(keySet).slice(0, args.limit),
-        nextCursor: undefined,
+        nextCursor: cursor === '0' ? undefined : cursor,
       }
     } catch (error) {
       throw this.toConnectionFailure(error)

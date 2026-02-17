@@ -247,7 +247,7 @@ export class SqliteMemcachedKeyIndexRepository
   >
 
   private readonly searchStatement: BetterSqlite3.Statement<
-    [string, string, number],
+    [string, string, string | null, string | null, number],
     { cache_key: string }
   >
 
@@ -271,13 +271,14 @@ export class SqliteMemcachedKeyIndexRepository
     `)
 
     this.searchStatement = this.db.prepare<
-      [string, string, number],
+      [string, string, string | null, string | null, number],
       { cache_key: string }
     >(`
       SELECT cache_key
       FROM memcached_key_index
       WHERE connection_id = ?
         AND cache_key LIKE ? ESCAPE '\\'
+        AND (? IS NULL OR cache_key > ?)
       ORDER BY cache_key COLLATE NOCASE ASC
       LIMIT ?
     `)
@@ -307,9 +308,17 @@ export class SqliteMemcachedKeyIndexRepository
     connectionId: string,
     pattern: string,
     limit: number,
+    cursor?: string,
   ): Promise<string[]> {
     const sqlPattern = toSqlLikePattern(pattern)
-    const rows = this.searchStatement.all(connectionId, sqlPattern, limit)
+    const cursorValue = cursor ?? null
+    const rows = this.searchStatement.all(
+      connectionId,
+      sqlPattern,
+      cursorValue,
+      cursorValue,
+      limit,
+    )
     return rows.map((row) => row.cache_key)
   }
 

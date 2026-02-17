@@ -53,6 +53,27 @@ Installed and lockfile-pinned runtime/tooling dependencies needed for V1 deliver
   - onboarding when no profiles exist
   - settings dialog
 
+## V1 Hardening Updates
+
+- Workspace query UX:
+  - inline error states for capabilities, key list, and key detail queries
+  - retry actions for retryable query failures
+  - one-shot query error toasts keyed by query error update timestamp
+- Retryable error semantics:
+  - renderer-side operation errors now preserve `retryable` metadata from IPC responses
+  - retry controls are conditionally shown based on retryability
+- Cursor-based search pagination:
+  - `key.search` now accepts optional `cursor`
+  - Redis search returns continuation cursor when more scan pages remain
+  - Memcached indexed search supports cursor filtering and continuation cursor output
+  - renderer now supports loading next page for search results (not only list mode)
+- Connection create safety:
+  - create flow now performs compensating rollback of profile metadata if secret storage fails
+  - safe error payload reports rollback metadata without exposing credentials
+- Edit-mode connection test:
+  - optional `connectionId` in `connection.test` enables stored-secret fallback
+  - blank credential fields in edit mode now test with stored keychain secret by default
+
 ## Storage and Security
 
 - Metadata persistence: local SQLite database in app user data directory.
@@ -65,6 +86,10 @@ Installed and lockfile-pinned runtime/tooling dependencies needed for V1 deliver
   - read-only policy behavior
   - service-level mutation blocking
   - IPC schema envelope validation
+  - create rollback behavior when secret persistence fails
+  - edit-mode connection test secret fallback/overlay behavior
+  - renderer IPC error unwrap preserving `retryable` metadata
+  - provider search pagination continuation behavior for Redis and Memcached
 
 Run:
 

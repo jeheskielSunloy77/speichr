@@ -76,10 +76,12 @@ class InMemoryMemcachedIndexRepository
     connectionId: string,
     pattern: string,
     limit: number,
+    cursor?: string,
   ): Promise<string[]> {
     void connectionId
     void pattern
     void limit
+    void cursor
     return []
   }
 
@@ -107,22 +109,27 @@ const capabilities: ProviderCapabilities = {
   supportsPatternScan: true,
 }
 
-const createGatewayMock = (
-  overrides?: Partial<Pick<CacheGateway, 'setValue'>>,
-): CacheGateway => ({
-  testConnection: vi.fn(async () => ({ latencyMs: 5, capabilities })),
-  getCapabilities: vi.fn(() => capabilities),
-  listKeys: vi.fn(async () => ({ keys: [], nextCursor: undefined })),
-  searchKeys: vi.fn(async () => ({ keys: [], nextCursor: undefined })),
-  getValue: vi.fn(async (profile, _secret, key) => ({
-    key,
-    value: null,
-    ttlSeconds: null,
-    supportsTTL: profile.engine === 'redis',
-  })),
-  setValue: overrides?.setValue ?? vi.fn(async () => undefined),
-  deleteKey: vi.fn(async () => undefined),
-})
+const createGatewayMock = (overrides?: Partial<CacheGateway>): CacheGateway => {
+  const base: CacheGateway = {
+    testConnection: vi.fn(async () => ({ latencyMs: 5, capabilities })),
+    getCapabilities: vi.fn(() => capabilities),
+    listKeys: vi.fn(async () => ({ keys: [], nextCursor: undefined })),
+    searchKeys: vi.fn(async () => ({ keys: [], nextCursor: undefined })),
+    getValue: vi.fn(async (profile, _secret, key) => ({
+      key,
+      value: null,
+      ttlSeconds: null,
+      supportsTTL: profile.engine === 'redis',
+    })),
+    setValue: vi.fn(async () => undefined),
+    deleteKey: vi.fn(async () => undefined),
+  }
+
+  return {
+    ...base,
+    ...overrides,
+  }
+}
 
 const createConnectionPayload = (): ConnectionCreateRequest => ({
   profile: {
@@ -140,6 +147,23 @@ const createConnectionPayload = (): ConnectionCreateRequest => ({
   secret: {
     password: 'secret',
   },
+})
+
+const createStoredProfile = (): ConnectionProfile => ({
+  id: 'stored-1',
+  name: 'stored redis',
+  engine: 'redis',
+  host: '127.0.0.1',
+  port: 6379,
+  dbIndex: 0,
+  tlsEnabled: false,
+  environment: 'dev',
+  tags: [],
+  secretRef: 'stored-1',
+  readOnly: false,
+  timeoutMs: 5000,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
 })
 
 describe('CachifyService', () => {
@@ -209,5 +233,111 @@ describe('CachifyService', () => {
     ).rejects.toBeInstanceOf(OperationFailure)
 
     expect(setValueMock).not.toHaveBeenCalled()
+  })
+
+  it('rolls back metadata when secret storage fails during create', async () => {
+    const repository = new InMemoryConnectionRepository()
+    const memcachedIndex = new InMemoryMemcachedIndexRepository()
+    const gateway = createGatewayMock()
+    const secretStore: SecretStore = {
+      saveSecret: vi.fn(async () => {
+        throw new Error('keychain unavailable')
+      }),
+      getSecret: vi.fn(async () => ({ password: 'secret' })),
+      deleteSecret: vi.fn(async () => undefined),
+    }
+
+    const service = new CachifyService(
+      repository,
+      secretStore,
+      memcachedIndex,
+      gateway,
+    )
+
+    await expect(service.createConnection(createConnectionPayload())).rejects.toEqual(
+      expect.objectContaining({
+        name: 'OperationFailure',
+        code: 'INTERNAL_ERROR',
+      }),
+    )
+
+    const profiles = await repository.list()
+    expect(profiles).toHaveLength(0)
+  })
+
+  it('uses stored secret for edit-mode connection tests when secret input is blank', async () => {
+    const repository = new InMemoryConnectionRepository()
+    const secretStore = new InMemorySecretStore()
+    const memcachedIndex = new InMemoryMemcachedIndexRepository()
+    const testConnectionMock = vi.fn(async () => ({ latencyMs: 7, capabilities }))
+    const gateway = createGatewayMock({ testConnection: testConnectionMock })
+    const storedProfile = createStoredProfile()
+
+    await repository.save(storedProfile)
+    await secretStore.saveSecret(storedProfile.id, {
+      username: 'stored-user',
+      password: 'stored-pass',
+    })
+
+    const service = new CachifyService(
+      repository,
+      secretStore,
+      memcachedIndex,
+      gateway,
+    )
+
+    await service.testConnection({
+      connectionId: storedProfile.id,
+      profile: createConnectionPayload().profile,
+      secret: {},
+    })
+
+    expect(testConnectionMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        username: 'stored-user',
+        password: 'stored-pass',
+      }),
+    )
+  })
+
+  it('overlays provided edit-mode test secret fields on top of stored secret', async () => {
+    const repository = new InMemoryConnectionRepository()
+    const secretStore = new InMemorySecretStore()
+    const memcachedIndex = new InMemoryMemcachedIndexRepository()
+    const testConnectionMock = vi.fn(async () => ({ latencyMs: 9, capabilities }))
+    const gateway = createGatewayMock({ testConnection: testConnectionMock })
+    const storedProfile = createStoredProfile()
+
+    await repository.save(storedProfile)
+    await secretStore.saveSecret(storedProfile.id, {
+      username: 'stored-user',
+      password: 'stored-pass',
+      token: 'stored-token',
+    })
+
+    const service = new CachifyService(
+      repository,
+      secretStore,
+      memcachedIndex,
+      gateway,
+    )
+
+    await service.testConnection({
+      connectionId: storedProfile.id,
+      profile: createConnectionPayload().profile,
+      secret: {
+        password: 'override-pass',
+      },
+    })
+
+    expect(testConnectionMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        username: 'stored-user',
+        password: 'override-pass',
+        token: 'stored-token',
+      }),
+    )
   })
 })

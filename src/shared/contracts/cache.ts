@@ -75,6 +75,7 @@ export interface ConnectionGetRequest {
 }
 
 export interface ConnectionTestRequest {
+  connectionId?: string
   profile: ConnectionDraft
   secret: ConnectionSecret
 }
@@ -97,6 +98,7 @@ export interface KeyListRequest {
 export interface KeySearchRequest {
   connectionId: string
   pattern: string
+  cursor?: string
   limit: number
 }
 

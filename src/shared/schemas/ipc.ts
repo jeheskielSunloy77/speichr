@@ -64,6 +64,7 @@ const connectionGetPayloadSchema = connectionDeletePayloadSchema
 
 const connectionTestPayloadSchema = z
   .object({
+    connectionId: idSchema.optional(),
     profile: connectionDraftSchema,
     secret: connectionSecretSchema,
   })
@@ -87,6 +88,7 @@ const keySearchPayloadSchema = z
   .object({
     connectionId: idSchema,
     pattern: z.string().min(1),
+    cursor: z.string().optional(),
     limit: z.number().int().min(1).max(500),
   })
   .strict()

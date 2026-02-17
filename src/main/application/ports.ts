@@ -23,7 +23,12 @@ export interface SecretStore {
 
 export interface MemcachedKeyIndexRepository {
   listKeys: (connectionId: string, limit: number) => Promise<string[]>
-  searchKeys: (connectionId: string, pattern: string, limit: number) => Promise<string[]>
+  searchKeys: (
+    connectionId: string,
+    pattern: string,
+    limit: number,
+    cursor?: string,
+  ) => Promise<string[]>
   upsertKey: (connectionId: string, key: string) => Promise<void>
   removeKey: (connectionId: string, key: string) => Promise<void>
   deleteByConnectionId: (connectionId: string) => Promise<void>
@@ -45,7 +50,7 @@ export interface CacheGateway {
   searchKeys: (
     profile: ConnectionProfile,
     secret: ConnectionSecret,
-    args: { pattern: string; limit: number },
+    args: { pattern: string; limit: number; cursor?: string },
   ) => Promise<KeyListResult>
   getValue: (
     profile: ConnectionProfile,

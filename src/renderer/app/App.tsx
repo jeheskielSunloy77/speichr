@@ -30,7 +30,10 @@ import {
 	CardTitle,
 } from '@/renderer/components/ui/card'
 import { Separator } from '@/renderer/components/ui/separator'
-import { unwrapResponse } from '@/renderer/features/common/ipc'
+import {
+	RendererOperationError,
+	unwrapResponse,
+} from '@/renderer/features/common/ipc'
 import { ConnectionFormDialog } from '@/renderer/features/connections/connection-form-dialog'
 import { SettingsPanel } from '@/renderer/features/settings/settings-panel'
 import { KeyDetailCard } from '@/renderer/features/workspace/key-detail-card'
@@ -63,6 +66,36 @@ const defaultCapabilities: ProviderCapabilities = {
 	supportsBulkDeletePreview: false,
 	supportsSnapshotRestore: false,
 	supportsPatternScan: true,
+}
+
+type QueryErrorState = {
+	message: string
+	retryable: boolean
+}
+
+const getQueryErrorState = (error: unknown): QueryErrorState | undefined => {
+	if (!error) {
+		return undefined
+	}
+
+	if (error instanceof RendererOperationError) {
+		return {
+			message: error.message,
+			retryable: Boolean(error.retryable),
+		}
+	}
+
+	if (error instanceof Error) {
+		return {
+			message: error.message,
+			retryable: false,
+		}
+	}
+
+	return {
+		message: 'Operation failed.',
+		retryable: false,
+	}
 }
 
 export default function App() {
@@ -162,6 +195,7 @@ export default function App() {
 					await window.cachify.searchKeys({
 						connectionId: selectedConnectionId,
 						pattern: searchPattern.trim(),
+						cursor,
 						limit: DEFAULT_PAGE_SIZE,
 					}),
 				)
@@ -195,6 +229,60 @@ export default function App() {
 			)
 		},
 	})
+
+	const capabilitiesError = getQueryErrorState(capabilitiesQuery.error)
+	const keyListError = getQueryErrorState(keyListQuery.error)
+	const keyDetailError = getQueryErrorState(keyDetailQuery.error)
+
+	const lastQueryErrorToastRef = React.useRef({
+		capabilities: 0,
+		keyList: 0,
+		keyDetail: 0,
+	})
+
+	React.useEffect(() => {
+		if (!capabilitiesError || capabilitiesQuery.errorUpdatedAt === 0) {
+			return
+		}
+
+		if (
+			lastQueryErrorToastRef.current.capabilities ===
+			capabilitiesQuery.errorUpdatedAt
+		) {
+			return
+		}
+
+		lastQueryErrorToastRef.current.capabilities = capabilitiesQuery.errorUpdatedAt
+		toast.error(capabilitiesError.message)
+	}, [capabilitiesError, capabilitiesQuery.errorUpdatedAt])
+
+	React.useEffect(() => {
+		if (!keyListError || keyListQuery.errorUpdatedAt === 0) {
+			return
+		}
+
+		if (lastQueryErrorToastRef.current.keyList === keyListQuery.errorUpdatedAt) {
+			return
+		}
+
+		lastQueryErrorToastRef.current.keyList = keyListQuery.errorUpdatedAt
+		toast.error(keyListError.message)
+	}, [keyListError, keyListQuery.errorUpdatedAt])
+
+	React.useEffect(() => {
+		if (!keyDetailError || keyDetailQuery.errorUpdatedAt === 0) {
+			return
+		}
+
+		if (
+			lastQueryErrorToastRef.current.keyDetail === keyDetailQuery.errorUpdatedAt
+		) {
+			return
+		}
+
+		lastQueryErrorToastRef.current.keyDetail = keyDetailQuery.errorUpdatedAt
+		toast.error(keyDetailError.message)
+	}, [keyDetailError, keyDetailQuery.errorUpdatedAt])
 
 	React.useEffect(() => {
 		if (!selectedKey) {
@@ -484,6 +572,32 @@ export default function App() {
 							</CardContent>
 						</Card>
 
+						{capabilitiesError && (
+							<Card>
+								<CardContent className='flex items-center justify-between gap-3 p-3'>
+									<div className='text-xs'>
+										<p className='text-destructive font-medium'>
+											Unable to load provider capabilities.
+										</p>
+										<p className='text-muted-foreground'>
+											{capabilitiesError.message}
+										</p>
+									</div>
+									{capabilitiesError.retryable && (
+										<Button
+											variant='outline'
+											size='sm'
+											onClick={() => {
+												void capabilitiesQuery.refetch()
+											}}
+										>
+											Retry
+										</Button>
+									)}
+								</CardContent>
+							</Card>
+						)}
+
 						<div className='grid min-h-0 gap-3 lg:grid-cols-2'>
 							<KeyListCard
 								title='Key Browser'
@@ -491,6 +605,8 @@ export default function App() {
 								selectedKey={selectedKey}
 								searchPattern={searchPattern}
 								isLoading={keyListQuery.isLoading}
+								errorMessage={keyListError?.message}
+								isRetryableError={keyListError?.retryable}
 								readOnly={selectedConnection.readOnly}
 								hasNextPage={Boolean(keyList.nextCursor)}
 								onSearchPatternChange={(value) => {
@@ -504,6 +620,9 @@ export default function App() {
 										queryKey: ['keys', selectedConnectionId],
 									})
 								}
+								onRetry={() => {
+									void keyListQuery.refetch()
+								}}
 								onLoadNextPage={() => setCursor(keyList.nextCursor)}
 							/>
 
@@ -514,6 +633,8 @@ export default function App() {
 								readOnly={selectedConnection.readOnly}
 								supportsTTL={capabilities.supportsTTL}
 								isLoading={keyDetailQuery.isLoading}
+								errorMessage={keyDetailError?.message}
+								isRetryableError={keyDetailError?.retryable}
 								isExistingKey={Boolean(selectedKey)}
 								onNewKey={() => {
 									setSelectedKey(null)
@@ -524,6 +645,9 @@ export default function App() {
 								onKeyNameChange={setKeyName}
 								onValueChange={setKeyValue}
 								onTtlChange={setKeyTtlSeconds}
+								onRetry={() => {
+									void keyDetailQuery.refetch()
+								}}
 								onSave={() => saveKeyMutation.mutate()}
 								onDelete={() => {
 									if (selectedKey) {

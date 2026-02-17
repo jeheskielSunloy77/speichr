@@ -20,11 +20,14 @@ type KeyDetailCardProps = {
 	readOnly: boolean
 	supportsTTL: boolean
 	isLoading: boolean
+	errorMessage?: string
+	isRetryableError?: boolean
 	isExistingKey: boolean
 	onNewKey: () => void
 	onKeyNameChange: (value: string) => void
 	onValueChange: (value: string) => void
 	onTtlChange: (value: string) => void
+	onRetry?: () => void
 	onSave: () => void
 	onDelete: () => void
 }
@@ -36,11 +39,14 @@ export const KeyDetailCard = ({
 	readOnly,
 	supportsTTL,
 	isLoading,
+	errorMessage,
+	isRetryableError,
 	isExistingKey,
 	onNewKey,
 	onKeyNameChange,
 	onValueChange,
 	onTtlChange,
+	onRetry,
 	onSave,
 	onDelete,
 }: KeyDetailCardProps) => {
@@ -64,69 +70,83 @@ export const KeyDetailCard = ({
 				</div>
 			</CardHeader>
 			<CardContent className='space-y-3'>
-				<div className='space-y-1.5'>
-					<Label htmlFor='workspace-key'>Key</Label>
-					<Input
-						id='workspace-key'
-						value={keyName}
-						onChange={(event) => onKeyNameChange(event.target.value)}
-						placeholder='session:123'
-						disabled={isExistingKey || readOnly}
-					/>
-				</div>
-
-				<div className='space-y-1.5'>
-					<Label htmlFor='workspace-value'>Value</Label>
-					<Textarea
-						id='workspace-value'
-						value={value}
-						onChange={(event) => onValueChange(event.target.value)}
-						className='min-h-44'
-						placeholder='JSON or string value'
-						disabled={readOnly}
-					/>
-				</div>
-
-				{supportsTTL && (
-					<div className='space-y-1.5'>
-						<Label htmlFor='workspace-ttl'>TTL seconds</Label>
-						<Input
-							id='workspace-ttl'
-							value={ttlSeconds}
-							onChange={(event) => onTtlChange(event.target.value)}
-							placeholder='Optional'
-							disabled={readOnly}
-						/>
-					</div>
-				)}
-
-				<div className='flex items-center justify-between gap-2'>
+				{isLoading ? (
 					<div className='text-muted-foreground flex items-center gap-1.5 text-xs'>
 						<FilePenLineIcon className='size-3.5' />
-						{isLoading
-							? 'Loading key details...'
-							: isExistingKey
-								? 'Editing existing key'
-								: 'Preparing new key'}
+						Loading key details...
 					</div>
-					<div className='flex gap-2'>
-						{isExistingKey && (
-							<Button
-								variant='destructive'
-								size='sm'
-								disabled={readOnly}
-								onClick={onDelete}
-							>
-								<Trash2Icon className='size-3.5' />
-								Delete
+				) : errorMessage ? (
+					<div className='space-y-2 border p-2 text-xs'>
+						<p className='text-destructive'>{errorMessage}</p>
+						{isRetryableError && onRetry && (
+							<Button size='sm' variant='outline' onClick={onRetry}>
+								Retry
 							</Button>
 						)}
-						<Button size='sm' disabled={readOnly} onClick={onSave}>
-							<SaveIcon className='size-3.5' />
-							Save
-						</Button>
 					</div>
-				</div>
+				) : (
+					<>
+						<div className='space-y-1.5'>
+							<Label htmlFor='workspace-key'>Key</Label>
+							<Input
+								id='workspace-key'
+								value={keyName}
+								onChange={(event) => onKeyNameChange(event.target.value)}
+								placeholder='session:123'
+								disabled={isExistingKey || readOnly}
+							/>
+						</div>
+
+						<div className='space-y-1.5'>
+							<Label htmlFor='workspace-value'>Value</Label>
+							<Textarea
+								id='workspace-value'
+								value={value}
+								onChange={(event) => onValueChange(event.target.value)}
+								className='min-h-44'
+								placeholder='JSON or string value'
+								disabled={readOnly}
+							/>
+						</div>
+
+						{supportsTTL && (
+							<div className='space-y-1.5'>
+								<Label htmlFor='workspace-ttl'>TTL seconds</Label>
+								<Input
+									id='workspace-ttl'
+									value={ttlSeconds}
+									onChange={(event) => onTtlChange(event.target.value)}
+									placeholder='Optional'
+									disabled={readOnly}
+								/>
+							</div>
+						)}
+
+						<div className='flex items-center justify-between gap-2'>
+							<div className='text-muted-foreground flex items-center gap-1.5 text-xs'>
+								<FilePenLineIcon className='size-3.5' />
+								{isExistingKey ? 'Editing existing key' : 'Preparing new key'}
+							</div>
+							<div className='flex gap-2'>
+								{isExistingKey && (
+									<Button
+										variant='destructive'
+										size='sm'
+										disabled={readOnly}
+										onClick={onDelete}
+									>
+										<Trash2Icon className='size-3.5' />
+										Delete
+									</Button>
+								)}
+								<Button size='sm' disabled={readOnly} onClick={onSave}>
+									<SaveIcon className='size-3.5' />
+									Save
+								</Button>
+							</div>
+						</div>
+					</>
+				)}
 			</CardContent>
 		</Card>
 	)

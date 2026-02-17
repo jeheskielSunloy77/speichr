@@ -18,12 +18,15 @@ type KeyListCardProps = {
 	selectedKey: string | null
 	searchPattern: string
 	isLoading: boolean
+	errorMessage?: string
+	isRetryableError?: boolean
 	readOnly: boolean
 	hasNextPage: boolean
 	onSearchPatternChange: (value: string) => void
 	onSelectKey: (key: string) => void
 	onDeleteKey: (key: string) => void
 	onRefresh: () => void
+	onRetry?: () => void
 	onLoadNextPage: () => void
 }
 
@@ -33,12 +36,15 @@ export const KeyListCard = ({
 	selectedKey,
 	searchPattern,
 	isLoading,
+	errorMessage,
+	isRetryableError,
 	readOnly,
 	hasNextPage,
 	onSearchPatternChange,
 	onSelectKey,
 	onDeleteKey,
 	onRefresh,
+	onRetry,
 	onLoadNextPage,
 }: KeyListCardProps) => {
 	return (
@@ -73,6 +79,15 @@ export const KeyListCard = ({
 				<div className='no-scrollbar min-h-0 flex-1 space-y-1 overflow-auto'>
 					{isLoading ? (
 						<p className='text-muted-foreground p-2 text-xs'>Loading keys...</p>
+					) : errorMessage ? (
+						<div className='space-y-2 border p-2 text-xs'>
+							<p className='text-destructive'>{errorMessage}</p>
+							{isRetryableError && onRetry && (
+								<Button size='sm' variant='outline' onClick={onRetry}>
+									Retry
+								</Button>
+							)}
+						</div>
 					) : keys.length === 0 ? (
 						<p className='text-muted-foreground p-2 text-xs'>
 							No keys found for this query.
@@ -113,7 +128,7 @@ export const KeyListCard = ({
 					)}
 				</div>
 
-				{hasNextPage && !searchPattern && (
+				{hasNextPage && (
 					<Button variant='outline' size='sm' onClick={onLoadNextPage}>
 						Load Next Page
 					</Button>

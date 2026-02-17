@@ -156,6 +156,8 @@ export const ConnectionFormDialog = ({
 		try {
 			const result = unwrapResponse(
 				await window.cachify.testConnection({
+					connectionId:
+						mode === 'edit' && initialProfile ? initialProfile.id : undefined,
 					profile: draft,
 					secret,
 				}),
@@ -222,7 +224,9 @@ export const ConnectionFormDialog = ({
 						{mode === 'create' ? 'New Connection' : 'Edit Connection'}
 					</DialogTitle>
 					<DialogDescription>
-						Configure Redis or Memcached profile settings and credentials.
+						{mode === 'create'
+							? 'Configure Redis or Memcached profile settings and credentials.'
+							: 'Configure profile settings. Leave credentials blank to test using the stored secret.'}
 					</DialogDescription>
 				</DialogHeader>
 
