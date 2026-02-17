@@ -45,6 +45,7 @@ import {
   unwrapResponse,
 } from '@/renderer/features/common/ipc'
 import { ConnectionFormDialog } from '@/renderer/features/connections/connection-form-dialog'
+import { GovernancePanel } from '@/renderer/features/governance/governance-panel'
 import { ObservabilityPanel } from '@/renderer/features/observability/observability-panel'
 import { SettingsPanel } from '@/renderer/features/settings/settings-panel'
 import { WorkflowPanel } from '@/renderer/features/workflows/workflow-panel'
@@ -67,7 +68,12 @@ type ConnectionDialogState = {
   profile: ConnectionProfile | null
 }
 
-type WorkspaceTab = 'workspace' | 'workflows' | 'observability' | 'alerts'
+type WorkspaceTab =
+  | 'workspace'
+  | 'workflows'
+  | 'observability'
+  | 'alerts'
+  | 'governance'
 
 const defaultKeyListResult: KeyListResult = {
   keys: [],
@@ -711,6 +717,7 @@ export default function App() {
                   Alerts
                   {unreadAlertCount > 0 ? ` (${unreadAlertCount})` : ''}
                 </TabsTrigger>
+                <TabsTrigger value='governance'>Governance</TabsTrigger>
               </TabsList>
 
               <TabsContent value='workspace' className='min-h-0'>
@@ -797,6 +804,10 @@ export default function App() {
 
               <TabsContent value='alerts' className='min-h-0 overflow-auto'>
                 <AlertsPanel connection={selectedConnection} />
+              </TabsContent>
+
+              <TabsContent value='governance' className='min-h-0 overflow-auto'>
+                <GovernancePanel connection={selectedConnection} />
               </TabsContent>
             </Tabs>
           </div>

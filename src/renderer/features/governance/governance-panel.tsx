@@ -1,0 +1,812 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import * as React from 'react'
+import { toast } from 'sonner'
+
+import { Badge } from '@/renderer/components/ui/badge'
+import { Button } from '@/renderer/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/renderer/components/ui/card'
+import { Checkbox } from '@/renderer/components/ui/checkbox'
+import { Input } from '@/renderer/components/ui/input'
+import { Label } from '@/renderer/components/ui/label'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/renderer/components/ui/table'
+import { Textarea } from '@/renderer/components/ui/textarea'
+import { unwrapResponse } from '@/renderer/features/common/ipc'
+import type {
+  ConnectionProfile,
+  GovernancePolicyPack,
+  RetentionPolicy,
+  RetentionPurgeResult,
+} from '@/shared/contracts/cache'
+
+type GovernancePanelProps = {
+  connection: ConnectionProfile
+}
+
+type PolicyPackFormState = {
+  name: string
+  description: string
+  environmentDev: boolean
+  environmentStaging: boolean
+  environmentProd: boolean
+  maxWorkflowItems: string
+  maxRetryAttempts: string
+  schedulingEnabled: boolean
+  executionWindowsText: string
+  enabled: boolean
+}
+
+type RetentionDraftState = Record<
+  RetentionPolicy['dataset'],
+  {
+    retentionDays: string
+    storageBudgetMb: string
+    autoPurgeOldest: boolean
+  }
+>
+
+const defaultPolicyPackFormState: PolicyPackFormState = {
+  name: '',
+  description: '',
+  environmentDev: true,
+  environmentStaging: true,
+  environmentProd: false,
+  maxWorkflowItems: '500',
+  maxRetryAttempts: '2',
+  schedulingEnabled: false,
+  executionWindowsText: JSON.stringify(
+    [
+      {
+        id: 'window-default',
+        weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'],
+        startTime: '09:00',
+        endTime: '17:00',
+        timezone: 'UTC',
+      },
+    ],
+    null,
+    2,
+  ),
+  enabled: true,
+}
+
+const parsePolicyPackFormState = (form: PolicyPackFormState) => {
+  const environments: Array<'dev' | 'staging' | 'prod'> = []
+  if (form.environmentDev) {
+    environments.push('dev')
+  }
+  if (form.environmentStaging) {
+    environments.push('staging')
+  }
+  if (form.environmentProd) {
+    environments.push('prod')
+  }
+
+  if (environments.length === 0) {
+    throw new Error('Select at least one environment for the policy pack.')
+  }
+
+  let executionWindows: GovernancePolicyPack['executionWindows'] = []
+  if (form.schedulingEnabled) {
+    try {
+      const parsed = JSON.parse(form.executionWindowsText) as unknown
+      if (!Array.isArray(parsed)) {
+        throw new Error('Execution windows must be a JSON array.')
+      }
+      executionWindows = parsed as GovernancePolicyPack['executionWindows']
+    } catch (error) {
+      throw new Error(
+        error instanceof Error
+          ? error.message
+          : 'Execution windows JSON is invalid.',
+      )
+    }
+  }
+
+  return {
+    name: form.name.trim() || 'Untitled Policy Pack',
+    description: form.description.trim() || undefined,
+    environments,
+    maxWorkflowItems: Math.max(1, Number(form.maxWorkflowItems) || 1),
+    maxRetryAttempts: Math.max(1, Number(form.maxRetryAttempts) || 1),
+    schedulingEnabled: form.schedulingEnabled,
+    executionWindows,
+    enabled: form.enabled,
+  }
+}
+
+const toPolicyPackFormState = (policyPack: GovernancePolicyPack): PolicyPackFormState => ({
+  name: policyPack.name,
+  description: policyPack.description ?? '',
+  environmentDev: policyPack.environments.includes('dev'),
+  environmentStaging: policyPack.environments.includes('staging'),
+  environmentProd: policyPack.environments.includes('prod'),
+  maxWorkflowItems: String(policyPack.maxWorkflowItems),
+  maxRetryAttempts: String(policyPack.maxRetryAttempts),
+  schedulingEnabled: policyPack.schedulingEnabled,
+  executionWindowsText: JSON.stringify(policyPack.executionWindows, null, 2),
+  enabled: policyPack.enabled,
+})
+
+const createRetentionDrafts = (
+  policies: RetentionPolicy[],
+): RetentionDraftState => {
+  const fallback = () => ({
+    retentionDays: '30',
+    storageBudgetMb: '512',
+    autoPurgeOldest: true,
+  })
+
+  const map = new Map(policies.map((policy) => [policy.dataset, policy]))
+
+  return {
+    timelineEvents: map.get('timelineEvents')
+      ? {
+          retentionDays: String(map.get('timelineEvents')?.retentionDays ?? 30),
+          storageBudgetMb: String(map.get('timelineEvents')?.storageBudgetMb ?? 512),
+          autoPurgeOldest: Boolean(map.get('timelineEvents')?.autoPurgeOldest),
+        }
+      : fallback(),
+    observabilitySnapshots: map.get('observabilitySnapshots')
+      ? {
+          retentionDays: String(
+            map.get('observabilitySnapshots')?.retentionDays ?? 30,
+          ),
+          storageBudgetMb: String(
+            map.get('observabilitySnapshots')?.storageBudgetMb ?? 512,
+          ),
+          autoPurgeOldest: Boolean(
+            map.get('observabilitySnapshots')?.autoPurgeOldest,
+          ),
+        }
+      : fallback(),
+    workflowHistory: map.get('workflowHistory')
+      ? {
+          retentionDays: String(map.get('workflowHistory')?.retentionDays ?? 30),
+          storageBudgetMb: String(map.get('workflowHistory')?.storageBudgetMb ?? 512),
+          autoPurgeOldest: Boolean(map.get('workflowHistory')?.autoPurgeOldest),
+        }
+      : fallback(),
+    incidentArtifacts: map.get('incidentArtifacts')
+      ? {
+          retentionDays: String(map.get('incidentArtifacts')?.retentionDays ?? 30),
+          storageBudgetMb: String(map.get('incidentArtifacts')?.storageBudgetMb ?? 512),
+          autoPurgeOldest: Boolean(map.get('incidentArtifacts')?.autoPurgeOldest),
+        }
+      : fallback(),
+  }
+}
+
+export const GovernancePanel = ({ connection }: GovernancePanelProps) => {
+  const queryClient = useQueryClient()
+
+  const [editingPolicyPackId, setEditingPolicyPackId] = React.useState<
+    string | null
+  >(null)
+  const [policyPackForm, setPolicyPackForm] = React.useState<PolicyPackFormState>(
+    defaultPolicyPackFormState,
+  )
+  const [selectedAssignedPolicyPackId, setSelectedAssignedPolicyPackId] =
+    React.useState<string>('none')
+  const [retentionDrafts, setRetentionDrafts] = React.useState<RetentionDraftState>({
+    timelineEvents: {
+      retentionDays: '30',
+      storageBudgetMb: '512',
+      autoPurgeOldest: true,
+    },
+    observabilitySnapshots: {
+      retentionDays: '30',
+      storageBudgetMb: '512',
+      autoPurgeOldest: true,
+    },
+    workflowHistory: {
+      retentionDays: '30',
+      storageBudgetMb: '512',
+      autoPurgeOldest: true,
+    },
+    incidentArtifacts: {
+      retentionDays: '30',
+      storageBudgetMb: '512',
+      autoPurgeOldest: true,
+    },
+  })
+  const [purgeDataset, setPurgeDataset] = React.useState<
+    RetentionPolicy['dataset']
+  >('timelineEvents')
+  const [purgeOlderThan, setPurgeOlderThan] = React.useState('')
+  const [purgeDryRun, setPurgeDryRun] = React.useState(true)
+  const [lastPurgeResult, setLastPurgeResult] = React.useState<
+    RetentionPurgeResult | null
+  >(null)
+
+  const policyPacksQuery = useQuery({
+    queryKey: ['policy-packs'],
+    queryFn: async () => unwrapResponse(await window.cachify.listPolicyPacks()),
+  })
+
+  const assignmentsQuery = useQuery({
+    queryKey: ['policy-pack-assignments', connection.id],
+    queryFn: async () =>
+      unwrapResponse(
+        await window.cachify.listPolicyPackAssignments({
+          connectionId: connection.id,
+        }),
+      ),
+  })
+
+  const retentionPoliciesQuery = useQuery({
+    queryKey: ['retention-policies'],
+    queryFn: async () => unwrapResponse(await window.cachify.listRetentionPolicies()),
+  })
+
+  const storageSummaryQuery = useQuery({
+    queryKey: ['storage-summary'],
+    queryFn: async () => unwrapResponse(await window.cachify.getStorageSummary()),
+  })
+
+  React.useEffect(() => {
+    const assignment = assignmentsQuery.data?.[0]
+    setSelectedAssignedPolicyPackId(assignment?.policyPackId ?? 'none')
+  }, [assignmentsQuery.data])
+
+  React.useEffect(() => {
+    if (!retentionPoliciesQuery.data?.policies) {
+      return
+    }
+
+    setRetentionDrafts(createRetentionDrafts(retentionPoliciesQuery.data.policies))
+  }, [retentionPoliciesQuery.data])
+
+  const savePolicyPackMutation = useMutation({
+    mutationFn: async () => {
+      const policyPack = parsePolicyPackFormState(policyPackForm)
+
+      if (editingPolicyPackId) {
+        return unwrapResponse(
+          await window.cachify.updatePolicyPack({
+            id: editingPolicyPackId,
+            policyPack,
+          }),
+        )
+      }
+
+      return unwrapResponse(
+        await window.cachify.createPolicyPack({
+          policyPack,
+        }),
+      )
+    },
+    onSuccess: async (policyPack) => {
+      setEditingPolicyPackId(policyPack.id)
+      setPolicyPackForm(toPolicyPackFormState(policyPack))
+      toast.success('Governance policy pack saved.')
+      await queryClient.invalidateQueries({ queryKey: ['policy-packs'] })
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Unable to save policy pack.',
+      )
+    },
+  })
+
+  const deletePolicyPackMutation = useMutation({
+    mutationFn: async (id: string) =>
+      unwrapResponse(await window.cachify.deletePolicyPack({ id })),
+    onSuccess: async () => {
+      setEditingPolicyPackId(null)
+      setPolicyPackForm(defaultPolicyPackFormState)
+      toast.success('Governance policy pack deleted.')
+      await queryClient.invalidateQueries({ queryKey: ['policy-packs'] })
+      await queryClient.invalidateQueries({
+        queryKey: ['policy-pack-assignments', connection.id],
+      })
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Unable to delete policy pack.',
+      )
+    },
+  })
+
+  const assignPolicyPackMutation = useMutation({
+    mutationFn: async () =>
+      unwrapResponse(
+        await window.cachify.assignPolicyPack({
+          connectionId: connection.id,
+          policyPackId:
+            selectedAssignedPolicyPackId === 'none'
+              ? undefined
+              : selectedAssignedPolicyPackId,
+        }),
+      ),
+    onSuccess: async () => {
+      toast.success('Governance assignment updated.')
+      await queryClient.invalidateQueries({
+        queryKey: ['policy-pack-assignments', connection.id],
+      })
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Unable to assign policy pack.',
+      )
+    },
+  })
+
+  const updateRetentionPolicyMutation = useMutation({
+    mutationFn: async (dataset: RetentionPolicy['dataset']) =>
+      unwrapResponse(
+        await window.cachify.updateRetentionPolicy({
+          policy: {
+            dataset,
+            retentionDays: Math.max(1, Number(retentionDrafts[dataset].retentionDays) || 1),
+            storageBudgetMb: Math.max(
+              1,
+              Number(retentionDrafts[dataset].storageBudgetMb) || 1,
+            ),
+            autoPurgeOldest: retentionDrafts[dataset].autoPurgeOldest,
+          },
+        }),
+      ),
+    onSuccess: async () => {
+      toast.success('Retention policy saved.')
+      await queryClient.invalidateQueries({ queryKey: ['retention-policies'] })
+      await queryClient.invalidateQueries({ queryKey: ['storage-summary'] })
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Unable to save retention policy.',
+      )
+    },
+  })
+
+  const purgeMutation = useMutation({
+    mutationFn: async () =>
+      unwrapResponse(
+        await window.cachify.purgeRetentionData({
+          dataset: purgeDataset,
+          olderThan:
+            purgeOlderThan.trim().length > 0
+              ? new Date(purgeOlderThan).toISOString()
+              : undefined,
+          dryRun: purgeDryRun,
+        }),
+      ),
+    onSuccess: async (result) => {
+      setLastPurgeResult(result)
+      toast.success(
+        result.dryRun
+          ? 'Retention purge dry-run completed.'
+          : 'Retention purge completed.',
+      )
+      await queryClient.invalidateQueries({ queryKey: ['storage-summary'] })
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Unable to purge retention data.')
+    },
+  })
+
+  return (
+    <div className='grid min-h-0 gap-3 xl:grid-cols-2'>
+      <Card className='min-h-0'>
+        <CardHeader>
+          <CardTitle>Governance Policy Packs</CardTitle>
+          <CardDescription>
+            Define workflow limits, scheduling windows, and environment-level automation
+            controls.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className='space-y-3'>
+          <div className='space-y-1.5'>
+            <Label htmlFor='policy-pack-name'>Policy Pack Name</Label>
+            <Input
+              id='policy-pack-name'
+              value={policyPackForm.name}
+              onChange={(event) =>
+                setPolicyPackForm((current) => ({
+                  ...current,
+                  name: event.target.value,
+                }))
+              }
+            />
+          </div>
+          <div className='space-y-1.5'>
+            <Label htmlFor='policy-pack-description'>Description</Label>
+            <Input
+              id='policy-pack-description'
+              value={policyPackForm.description}
+              onChange={(event) =>
+                setPolicyPackForm((current) => ({
+                  ...current,
+                  description: event.target.value,
+                }))
+              }
+            />
+          </div>
+
+          <div className='space-y-2 rounded-none border p-2 text-xs'>
+            <p className='font-medium'>Environments</p>
+            <label className='flex items-center gap-2'>
+              <Checkbox
+                checked={policyPackForm.environmentDev}
+                onCheckedChange={(checked) =>
+                  setPolicyPackForm((current) => ({
+                    ...current,
+                    environmentDev: Boolean(checked),
+                  }))
+                }
+              />
+              dev
+            </label>
+            <label className='flex items-center gap-2'>
+              <Checkbox
+                checked={policyPackForm.environmentStaging}
+                onCheckedChange={(checked) =>
+                  setPolicyPackForm((current) => ({
+                    ...current,
+                    environmentStaging: Boolean(checked),
+                  }))
+                }
+              />
+              staging
+            </label>
+            <label className='flex items-center gap-2'>
+              <Checkbox
+                checked={policyPackForm.environmentProd}
+                onCheckedChange={(checked) =>
+                  setPolicyPackForm((current) => ({
+                    ...current,
+                    environmentProd: Boolean(checked),
+                  }))
+                }
+              />
+              prod
+            </label>
+          </div>
+
+          <div className='grid gap-3 md:grid-cols-2'>
+            <div className='space-y-1.5'>
+              <Label htmlFor='policy-pack-max-items'>Max Workflow Items</Label>
+              <Input
+                id='policy-pack-max-items'
+                value={policyPackForm.maxWorkflowItems}
+                onChange={(event) =>
+                  setPolicyPackForm((current) => ({
+                    ...current,
+                    maxWorkflowItems: event.target.value,
+                  }))
+                }
+              />
+            </div>
+            <div className='space-y-1.5'>
+              <Label htmlFor='policy-pack-max-retry'>Max Retry Attempts</Label>
+              <Input
+                id='policy-pack-max-retry'
+                value={policyPackForm.maxRetryAttempts}
+                onChange={(event) =>
+                  setPolicyPackForm((current) => ({
+                    ...current,
+                    maxRetryAttempts: event.target.value,
+                  }))
+                }
+              />
+            </div>
+          </div>
+
+          <div className='space-y-2 rounded-none border p-2 text-xs'>
+            <label className='flex items-center gap-2'>
+              <Checkbox
+                checked={policyPackForm.schedulingEnabled}
+                onCheckedChange={(checked) =>
+                  setPolicyPackForm((current) => ({
+                    ...current,
+                    schedulingEnabled: Boolean(checked),
+                  }))
+                }
+              />
+              Scheduling enabled
+            </label>
+            <label className='flex items-center gap-2'>
+              <Checkbox
+                checked={policyPackForm.enabled}
+                onCheckedChange={(checked) =>
+                  setPolicyPackForm((current) => ({
+                    ...current,
+                    enabled: Boolean(checked),
+                  }))
+                }
+              />
+              Policy pack enabled
+            </label>
+          </div>
+
+          <div className='space-y-1.5'>
+            <Label htmlFor='policy-pack-windows'>Execution Windows (JSON)</Label>
+            <Textarea
+              id='policy-pack-windows'
+              className='min-h-32 font-mono'
+              value={policyPackForm.executionWindowsText}
+              onChange={(event) =>
+                setPolicyPackForm((current) => ({
+                  ...current,
+                  executionWindowsText: event.target.value,
+                }))
+              }
+              disabled={!policyPackForm.schedulingEnabled}
+            />
+          </div>
+
+          <div className='flex flex-wrap gap-2'>
+            <Button
+              variant='outline'
+              onClick={() => savePolicyPackMutation.mutate()}
+              disabled={savePolicyPackMutation.isPending}
+            >
+              {editingPolicyPackId ? 'Update Policy Pack' : 'Create Policy Pack'}
+            </Button>
+            <Button
+              variant='outline'
+              onClick={() => {
+                setEditingPolicyPackId(null)
+                setPolicyPackForm(defaultPolicyPackFormState)
+              }}
+              disabled={savePolicyPackMutation.isPending}
+            >
+              New Policy Pack
+            </Button>
+            <Button
+              variant='outline'
+              onClick={() => {
+                if (editingPolicyPackId) {
+                  deletePolicyPackMutation.mutate(editingPolicyPackId)
+                }
+              }}
+              disabled={!editingPolicyPackId || deletePolicyPackMutation.isPending}
+            >
+              Delete Policy Pack
+            </Button>
+          </div>
+
+          <div className='space-y-2 rounded-none border p-2 text-xs'>
+            <p className='font-medium'>Assignment For Connection: {connection.name}</p>
+            <select
+              className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
+              value={selectedAssignedPolicyPackId}
+              onChange={(event) => setSelectedAssignedPolicyPackId(event.target.value)}
+            >
+              <option value='none'>No policy pack assigned</option>
+              {(policyPacksQuery.data ?? []).map((policyPack) => (
+                <option key={policyPack.id} value={policyPack.id}>
+                  {policyPack.name}
+                </option>
+              ))}
+            </select>
+            <Button
+              size='sm'
+              variant='outline'
+              onClick={() => assignPolicyPackMutation.mutate()}
+              disabled={assignPolicyPackMutation.isPending}
+            >
+              Apply Assignment
+            </Button>
+          </div>
+
+          <div className='max-h-56 space-y-2 overflow-auto border p-2'>
+            {(policyPacksQuery.data?.length ?? 0) === 0 ? (
+              <p className='text-muted-foreground text-xs'>
+                No governance policy packs configured.
+              </p>
+            ) : (
+              policyPacksQuery.data?.map((policyPack) => (
+                <button
+                  key={policyPack.id}
+                  type='button'
+                  className='w-full space-y-1 border p-2 text-left text-xs hover:bg-muted/40'
+                  onClick={() => {
+                    setEditingPolicyPackId(policyPack.id)
+                    setPolicyPackForm(toPolicyPackFormState(policyPack))
+                  }}
+                >
+                  <div className='flex items-center justify-between gap-2'>
+                    <p className='truncate font-medium'>{policyPack.name}</p>
+                    <Badge variant={policyPack.enabled ? 'default' : 'outline'}>
+                      {policyPack.enabled ? 'enabled' : 'disabled'}
+                    </Badge>
+                  </div>
+                  <p className='text-muted-foreground truncate'>
+                    env: {policyPack.environments.join(', ')}
+                  </p>
+                  <p className='text-muted-foreground truncate'>
+                    max items: {policyPack.maxWorkflowItems} | max retry:{' '}
+                    {policyPack.maxRetryAttempts}
+                  </p>
+                  <p className='text-muted-foreground truncate'>
+                    scheduling: {policyPack.schedulingEnabled ? 'enabled' : 'disabled'} | windows:{' '}
+                    {policyPack.executionWindows.length}
+                  </p>
+                </button>
+              ))
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className='grid min-h-0 gap-3'>
+        <Card>
+          <CardHeader>
+            <CardTitle>Retention Policies</CardTitle>
+            <CardDescription>
+              Configure retention windows and storage budgets by dataset class.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className='space-y-3'>
+            {(Object.keys(retentionDrafts) as Array<RetentionPolicy['dataset']>).map(
+              (dataset) => (
+                <div key={dataset} className='space-y-2 border p-2 text-xs'>
+                  <p className='font-medium'>{dataset}</p>
+                  <div className='grid gap-2 md:grid-cols-3'>
+                    <Input
+                      value={retentionDrafts[dataset].retentionDays}
+                      onChange={(event) =>
+                        setRetentionDrafts((current) => ({
+                          ...current,
+                          [dataset]: {
+                            ...current[dataset],
+                            retentionDays: event.target.value,
+                          },
+                        }))
+                      }
+                      placeholder='Retention days'
+                    />
+                    <Input
+                      value={retentionDrafts[dataset].storageBudgetMb}
+                      onChange={(event) =>
+                        setRetentionDrafts((current) => ({
+                          ...current,
+                          [dataset]: {
+                            ...current[dataset],
+                            storageBudgetMb: event.target.value,
+                          },
+                        }))
+                      }
+                      placeholder='Storage budget (MB)'
+                    />
+                    <label className='flex items-center gap-2'>
+                      <Checkbox
+                        checked={retentionDrafts[dataset].autoPurgeOldest}
+                        onCheckedChange={(checked) =>
+                          setRetentionDrafts((current) => ({
+                            ...current,
+                            [dataset]: {
+                              ...current[dataset],
+                              autoPurgeOldest: Boolean(checked),
+                            },
+                          }))
+                        }
+                      />
+                      auto purge oldest
+                    </label>
+                  </div>
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    onClick={() => updateRetentionPolicyMutation.mutate(dataset)}
+                    disabled={updateRetentionPolicyMutation.isPending}
+                  >
+                    Save {dataset}
+                  </Button>
+                </div>
+              ),
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Storage Budget Controls</CardTitle>
+            <CardDescription>
+              Inspect usage by dataset and run manual purge operations.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className='space-y-3'>
+            <div className='grid gap-3 md:grid-cols-3'>
+              <select
+                className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
+                value={purgeDataset}
+                onChange={(event) =>
+                  setPurgeDataset(event.target.value as RetentionPolicy['dataset'])
+                }
+              >
+                <option value='timelineEvents'>timelineEvents</option>
+                <option value='observabilitySnapshots'>observabilitySnapshots</option>
+                <option value='workflowHistory'>workflowHistory</option>
+                <option value='incidentArtifacts'>incidentArtifacts</option>
+              </select>
+              <Input
+                type='datetime-local'
+                value={purgeOlderThan}
+                onChange={(event) => setPurgeOlderThan(event.target.value)}
+              />
+              <label className='flex items-center gap-2 text-xs'>
+                <Checkbox
+                  checked={purgeDryRun}
+                  onCheckedChange={(checked) => setPurgeDryRun(Boolean(checked))}
+                />
+                dry-run only
+              </label>
+            </div>
+            <div className='flex flex-wrap gap-2'>
+              <Button
+                variant='outline'
+                onClick={() => purgeMutation.mutate()}
+                disabled={purgeMutation.isPending}
+              >
+                Run Purge
+              </Button>
+              <Button
+                variant='outline'
+                onClick={() => {
+                  void storageSummaryQuery.refetch()
+                }}
+              >
+                Refresh Summary
+              </Button>
+            </div>
+
+            {lastPurgeResult && (
+              <div className='rounded-none border p-2 text-xs'>
+                <p>dataset: {lastPurgeResult.dataset}</p>
+                <p>cutoff: {new Date(lastPurgeResult.cutoff).toLocaleString()}</p>
+                <p>dry-run: {lastPurgeResult.dryRun ? 'yes' : 'no'}</p>
+                <p>deleted rows: {lastPurgeResult.deletedRows}</p>
+                <p>freed bytes: {lastPurgeResult.freedBytes}</p>
+              </div>
+            )}
+
+            <div className='max-h-56 overflow-auto border'>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Dataset</TableHead>
+                    <TableHead>Rows</TableHead>
+                    <TableHead>Total Bytes</TableHead>
+                    <TableHead>Usage</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(storageSummaryQuery.data?.datasets ?? []).map((dataset) => (
+                    <TableRow key={dataset.dataset}>
+                      <TableCell>{dataset.dataset}</TableCell>
+                      <TableCell>{dataset.rowCount}</TableCell>
+                      <TableCell>{dataset.totalBytes}</TableCell>
+                      <TableCell>{(dataset.usageRatio * 100).toFixed(1)}%</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={dataset.overBudget ? 'destructive' : 'outline'}
+                        >
+                          {dataset.overBudget ? 'over budget' : 'ok'}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}
