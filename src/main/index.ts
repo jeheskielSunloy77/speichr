@@ -1,56 +1,110 @@
-import { app, BrowserWindow } from 'electron';
-import path from 'node:path';
-import started from 'electron-squirrel-startup';
+import path from 'node:path'
 
-// Handle creating/removing shortcuts on Windows when installing/uninstalling.
+import { app, BrowserWindow } from 'electron'
+import started from 'electron-squirrel-startup'
+import type Database from 'better-sqlite3'
+
+import { CachifyService } from './application/cachify-service'
+import { DefaultCacheGateway } from './infrastructure/providers/cache-gateway'
+import { InMemorySecretStore } from './infrastructure/secrets/in-memory-secret-store'
+import { KeytarSecretStore } from './infrastructure/secrets/keytar-secret-store'
+import { registerIpcHandlers } from './interface-adapters/ipc'
+import {
+  createSqliteDatabase,
+  SqliteConnectionRepository,
+  SqliteMemcachedKeyIndexRepository,
+} from './persistence/sqlite'
+
 if (started) {
-  app.quit();
+  app.quit()
 }
 
-const createWindow = () => {
-  // Create the browser window.
+type RuntimeContext = {
+  db: Database.Database
+  service: CachifyService
+}
+
+let runtime: RuntimeContext | null = null
+
+const initializeRuntime = (): RuntimeContext => {
+  if (runtime) {
+    return runtime
+  }
+
+  const databasePath = path.join(app.getPath('userData'), 'cachify-studio.db')
+  const db = createSqliteDatabase(databasePath)
+
+  const connectionRepository = new SqliteConnectionRepository(db)
+  const memcachedKeyIndexRepository = new SqliteMemcachedKeyIndexRepository(db)
+
+  const secretStore =
+    process.env.CACHIFY_SECRET_STORE === 'memory'
+      ? new InMemorySecretStore()
+      : new KeytarSecretStore()
+
+  const cacheGateway = new DefaultCacheGateway(memcachedKeyIndexRepository)
+
+  const service = new CachifyService(
+    connectionRepository,
+    secretStore,
+    memcachedKeyIndexRepository,
+    cacheGateway,
+  )
+
+  registerIpcHandlers(service)
+
+  runtime = {
+    db,
+    service,
+  }
+
+  return runtime
+}
+
+const createMainWindow = (): BrowserWindow => {
   const mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 1360,
+    height: 860,
+    minWidth: 1120,
+    minHeight: 700,
+    title: 'Cachify Studio',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
     },
-  });
+  })
 
-  // and load the index.html of the app.
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+    void mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL)
   } else {
-    mainWindow.loadFile(
+    void mainWindow.loadFile(
       path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
-    );
+    )
   }
 
-  // Open the DevTools.
-  mainWindow.webContents.openDevTools();
-};
+  return mainWindow
+}
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
-app.on('ready', createWindow);
+app.whenReady().then(() => {
+  initializeRuntime()
+  createMainWindow()
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createMainWindow()
+    }
+  })
+})
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
-    app.quit();
+    app.quit()
   }
-});
+})
 
-app.on('activate', () => {
-  // On OS X it's common to re-create a window in the app when the
-  // dock icon is clicked and there are no other windows open.
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
-});
-
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and import them here.
+app.on('before-quit', () => {
+  runtime?.db.close()
+  runtime = null
+})
