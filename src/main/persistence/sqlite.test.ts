@@ -6,9 +6,13 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import type {
   AlertEvent,
+  AlertRule,
   ConnectionProfile,
+  GovernancePolicyPack,
   HistoryEvent,
+  IncidentBundle,
   ObservabilitySnapshot,
+  RetentionPolicy,
   SnapshotRecord,
   WorkflowExecutionRecord,
   WorkflowTemplate,
@@ -16,9 +20,14 @@ import type {
 import {
   createSqliteDatabase,
   SqliteAlertRepository,
+  SqliteAlertRuleRepository,
   SqliteConnectionRepository,
+  SqliteGovernanceAssignmentRepository,
+  SqliteGovernancePolicyPackRepository,
   SqliteHistoryRepository,
+  SqliteIncidentBundleRepository,
   SqliteObservabilityRepository,
+  SqliteRetentionRepository,
   SqliteSnapshotRepository,
   SqliteWorkflowExecutionRepository,
   SqliteWorkflowTemplateRepository,
@@ -193,6 +202,10 @@ describeSqlite('sqlite persistence v2', () => {
           durationMs: 42,
         },
       ],
+      checkpointToken: 'next:2',
+      policyPackId: 'policy-pack-1',
+      scheduleWindowId: 'window-1',
+      resumedFromExecutionId: 'wf-exec-parent',
     }
 
     await executionRepository.save(execution)
@@ -209,6 +222,10 @@ describeSqlite('sqlite persistence v2', () => {
     expect(executions).toHaveLength(1)
     expect(executions[0].retryCount).toBe(1)
     expect(executions[0].stepResults[0].attempts).toBe(2)
+    expect(executions[0].checkpointToken).toBe('next:2')
+    expect(executions[0].policyPackId).toBe('policy-pack-1')
+    expect(executions[0].scheduleWindowId).toBe('window-1')
+    expect(executions[0].resumedFromExecutionId).toBe('wf-exec-parent')
   })
 
   it('stores history and observability snapshots', async () => {
@@ -306,5 +323,110 @@ describeSqlite('sqlite persistence v2', () => {
     })
 
     expect(allAlerts).toHaveLength(1)
+  })
+
+  it('stores v3 governance, alert rule, incident, and retention entities', async () => {
+    const db = createTestDatabase()
+    const connectionRepository = new SqliteConnectionRepository(db)
+    const alertRuleRepository = new SqliteAlertRuleRepository(db)
+    const governancePolicyPackRepository = new SqliteGovernancePolicyPackRepository(db)
+    const governanceAssignmentRepository = new SqliteGovernanceAssignmentRepository(db)
+    const incidentBundleRepository = new SqliteIncidentBundleRepository(db)
+    const retentionRepository = new SqliteRetentionRepository(db)
+    const profile = createProfile()
+
+    await connectionRepository.save(profile)
+
+    const alertRule: AlertRule = {
+      id: 'rule-1',
+      name: 'High Error Rate',
+      metric: 'errorRate',
+      threshold: 0.2,
+      lookbackMinutes: 10,
+      severity: 'critical',
+      connectionId: profile.id,
+      environment: profile.environment,
+      enabled: true,
+      createdAt: '2026-02-17T03:15:00.000Z',
+      updatedAt: '2026-02-17T03:15:00.000Z',
+    }
+    await alertRuleRepository.save(alertRule)
+
+    const policyPack: GovernancePolicyPack = {
+      id: 'policy-pack-1',
+      name: 'Prod Guardrails',
+      description: 'Restrict prod automation',
+      environments: ['prod'],
+      maxWorkflowItems: 150,
+      maxRetryAttempts: 2,
+      schedulingEnabled: true,
+      executionWindows: [
+        {
+          id: 'window-1',
+          weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'],
+          startTime: '09:00',
+          endTime: '17:00',
+          timezone: 'UTC',
+        },
+      ],
+      enabled: true,
+      createdAt: '2026-02-17T03:16:00.000Z',
+      updatedAt: '2026-02-17T03:16:00.000Z',
+    }
+    await governancePolicyPackRepository.save(policyPack)
+    await governanceAssignmentRepository.assign({
+      connectionId: profile.id,
+      policyPackId: policyPack.id,
+    })
+
+    const incidentBundle: IncidentBundle = {
+      id: 'incident-1',
+      createdAt: '2026-02-17T03:20:00.000Z',
+      from: '2026-02-17T02:00:00.000Z',
+      to: '2026-02-17T03:00:00.000Z',
+      connectionIds: [profile.id],
+      includes: ['timeline', 'logs', 'diagnostics', 'metrics'],
+      redactionProfile: 'strict',
+      checksum: 'abc123',
+      artifactPath: '/tmp/incident-1.json',
+      timelineCount: 10,
+      logCount: 4,
+      diagnosticCount: 2,
+      metricCount: 8,
+    }
+    await incidentBundleRepository.save(incidentBundle)
+
+    const retentionPolicy: RetentionPolicy = {
+      dataset: 'incidentArtifacts',
+      retentionDays: 14,
+      storageBudgetMb: 64,
+      autoPurgeOldest: true,
+    }
+    await retentionRepository.savePolicy(retentionPolicy)
+
+    const rules = await alertRuleRepository.list()
+    const packs = await governancePolicyPackRepository.list()
+    const assignments = await governanceAssignmentRepository.list({
+      connectionId: profile.id,
+    })
+    const bundles = await incidentBundleRepository.list(10)
+    const retentionPolicies = await retentionRepository.listPolicies()
+    const summary = await retentionRepository.getStorageSummary()
+
+    expect(rules).toHaveLength(1)
+    expect(rules[0].metric).toBe('errorRate')
+    expect(packs).toHaveLength(1)
+    expect(packs[0].executionWindows[0].id).toBe('window-1')
+    expect(assignments).toHaveLength(1)
+    expect(assignments[0].policyPackId).toBe(policyPack.id)
+    expect(bundles).toHaveLength(1)
+    expect(bundles[0].redactionProfile).toBe('strict')
+    expect(
+      retentionPolicies.some(
+        (policy) =>
+          policy.dataset === 'incidentArtifacts' && policy.retentionDays === 14,
+      ),
+    ).toBe(true)
+    expect(summary.datasets.length).toBeGreaterThan(0)
   })
 })

@@ -15,6 +15,11 @@ const REQUIRED_TABLES = [
   'history_events',
   'observability_snapshots',
   'alert_events',
+  'alert_rules',
+  'governance_policy_packs',
+  'governance_assignments',
+  'incident_bundles',
+  'retention_policies',
 ]
 
 const REQUIRED_CONNECTION_COLUMNS = [
@@ -23,6 +28,13 @@ const REQUIRED_CONNECTION_COLUMNS = [
   'retry_backoff_ms',
   'retry_backoff_strategy',
   'retry_abort_on_error_rate',
+]
+
+const REQUIRED_WORKFLOW_EXECUTION_COLUMNS = [
+  'checkpoint_token',
+  'policy_pack_id',
+  'schedule_window_id',
+  'resumed_from_execution_id',
 ]
 
 const assert = (condition: unknown, message: string): void => {
@@ -113,6 +125,13 @@ try {
         `Missing required connection_profiles column in fresh schema: ${columnName}`,
       )
     }
+    const workflowColumns = getColumnNames(freshDb, 'workflow_executions')
+    for (const columnName of REQUIRED_WORKFLOW_EXECUTION_COLUMNS) {
+      assert(
+        workflowColumns.has(columnName),
+        `Missing required workflow_executions column in fresh schema: ${columnName}`,
+      )
+    }
     freshDb.close()
 
     const legacyPath = path.join(tempDirectory, 'legacy.db')
@@ -124,6 +143,16 @@ try {
       assert(
         upgradedColumns.has(columnName),
         `Legacy upgrade did not add column: ${columnName}`,
+      )
+    }
+    const upgradedWorkflowColumns = getColumnNames(
+      upgradedDb,
+      'workflow_executions',
+    )
+    for (const columnName of REQUIRED_WORKFLOW_EXECUTION_COLUMNS) {
+      assert(
+        upgradedWorkflowColumns.has(columnName),
+        `Legacy upgrade did not add workflow_executions column: ${columnName}`,
       )
     }
     upgradedDb.close()

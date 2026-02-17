@@ -1,18 +1,27 @@
 import type {
   AlertEvent,
   AlertListRequest,
+  AlertRule,
   ConnectionDraft,
   ConnectionProfile,
   ConnectionSecret,
   ConnectionTestResult,
+  GovernanceAssignment,
+  GovernanceAssignmentListRequest,
+  GovernancePolicyPack,
   HistoryEvent,
   HistoryQueryRequest,
+  IncidentBundle,
   KeyListResult,
   KeyValueRecord,
   ObservabilitySnapshot,
   OperationErrorCode,
   ProviderCapabilities,
+  RetentionPolicy,
+  RetentionPurgeRequest,
+  RetentionPurgeResult,
   SnapshotRecord,
+  StorageSummary,
   WorkflowExecutionListRequest,
   WorkflowExecutionRecord,
   WorkflowTemplate,
@@ -90,6 +99,37 @@ export interface AlertRepository {
   append: (event: AlertEvent) => Promise<void>
   list: (request: AlertListRequest) => Promise<AlertEvent[]>
   markRead: (id: string) => Promise<void>
+}
+
+export interface AlertRuleRepository {
+  list: () => Promise<AlertRule[]>
+  findById: (id: string) => Promise<AlertRule | null>
+  save: (rule: AlertRule) => Promise<void>
+  delete: (id: string) => Promise<void>
+}
+
+export interface GovernancePolicyPackRepository {
+  list: () => Promise<GovernancePolicyPack[]>
+  findById: (id: string) => Promise<GovernancePolicyPack | null>
+  save: (policyPack: GovernancePolicyPack) => Promise<void>
+  delete: (id: string) => Promise<void>
+}
+
+export interface GovernanceAssignmentRepository {
+  list: (args: GovernanceAssignmentListRequest) => Promise<GovernanceAssignment[]>
+  assign: (args: { connectionId: string; policyPackId?: string }) => Promise<void>
+}
+
+export interface IncidentBundleRepository {
+  save: (bundle: IncidentBundle) => Promise<void>
+  list: (limit: number) => Promise<IncidentBundle[]>
+}
+
+export interface RetentionRepository {
+  listPolicies: () => Promise<RetentionPolicy[]>
+  savePolicy: (policy: RetentionPolicy) => Promise<void>
+  purge: (request: RetentionPurgeRequest) => Promise<RetentionPurgeResult>
+  getStorageSummary: () => Promise<StorageSummary>
 }
 
 export interface NotificationPublisher {

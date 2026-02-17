@@ -6,11 +6,21 @@ import BetterSqlite3 from 'better-sqlite3'
 import type {
   AlertEvent,
   AlertListRequest,
+  AlertRule,
   ConnectionProfile,
+  GovernanceAssignment,
+  GovernanceAssignmentListRequest,
+  GovernancePolicyPack,
   HistoryEvent,
   HistoryQueryRequest,
+  IncidentBundle,
   ObservabilitySnapshot,
+  RetentionPolicy,
+  RetentionPurgeRequest,
+  RetentionPurgeResult,
   SnapshotRecord,
+  StorageSummary,
+  StorageDatasetSummary,
   WorkflowExecutionListRequest,
   WorkflowExecutionRecord,
   WorkflowStepResult,
@@ -18,10 +28,15 @@ import type {
 } from '../../shared/contracts/cache'
 import type {
   AlertRepository,
+  AlertRuleRepository,
   ConnectionRepository,
+  GovernanceAssignmentRepository,
+  GovernancePolicyPackRepository,
   HistoryRepository,
+  IncidentBundleRepository,
   MemcachedKeyIndexRepository,
   ObservabilityRepository,
+  RetentionRepository,
   SnapshotRepository,
   WorkflowExecutionRepository,
   WorkflowTemplateRepository,
@@ -131,6 +146,10 @@ const runMigrations = (db: BetterSqlite3.Database): void => {
       dry_run INTEGER NOT NULL,
       parameters_json TEXT NOT NULL,
       step_results_json TEXT NOT NULL,
+      checkpoint_token TEXT,
+      policy_pack_id TEXT,
+      schedule_window_id TEXT,
+      resumed_from_execution_id TEXT,
       error_message TEXT,
       FOREIGN KEY (connection_id) REFERENCES connection_profiles(id) ON DELETE CASCADE,
       FOREIGN KEY (workflow_template_id) REFERENCES workflow_templates(id) ON DELETE SET NULL
@@ -178,6 +197,66 @@ const runMigrations = (db: BetterSqlite3.Database): void => {
       is_read INTEGER NOT NULL DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS alert_rules (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      metric TEXT NOT NULL,
+      threshold REAL NOT NULL,
+      lookback_minutes INTEGER NOT NULL,
+      severity TEXT NOT NULL,
+      connection_id TEXT,
+      environment TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (connection_id) REFERENCES connection_profiles(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS governance_policy_packs (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      environments_json TEXT NOT NULL,
+      max_workflow_items INTEGER NOT NULL,
+      max_retry_attempts INTEGER NOT NULL,
+      scheduling_enabled INTEGER NOT NULL,
+      execution_windows_json TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS governance_assignments (
+      connection_id TEXT PRIMARY KEY,
+      policy_pack_id TEXT,
+      assigned_at TEXT NOT NULL,
+      FOREIGN KEY (connection_id) REFERENCES connection_profiles(id) ON DELETE CASCADE,
+      FOREIGN KEY (policy_pack_id) REFERENCES governance_policy_packs(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS incident_bundles (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      from_ts TEXT NOT NULL,
+      to_ts TEXT NOT NULL,
+      connection_ids_json TEXT NOT NULL,
+      includes_json TEXT NOT NULL,
+      redaction_profile TEXT NOT NULL,
+      checksum TEXT NOT NULL,
+      artifact_path TEXT NOT NULL,
+      timeline_count INTEGER NOT NULL,
+      log_count INTEGER NOT NULL,
+      diagnostic_count INTEGER NOT NULL,
+      metric_count INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS retention_policies (
+      dataset TEXT PRIMARY KEY,
+      retention_days INTEGER NOT NULL,
+      storage_budget_mb INTEGER NOT NULL,
+      auto_purge_oldest INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_connection_profiles_engine ON connection_profiles(engine);
     CREATE INDEX IF NOT EXISTS idx_connection_profiles_name ON connection_profiles(name);
     CREATE INDEX IF NOT EXISTS idx_memcached_key_index_connection_id ON memcached_key_index(connection_id);
@@ -187,6 +266,9 @@ const runMigrations = (db: BetterSqlite3.Database): void => {
     CREATE INDEX IF NOT EXISTS idx_history_events_status ON history_events(status, timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_observability_connection ON observability_snapshots(connection_id, timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_alert_events_read ON alert_events(is_read, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_alert_rules_enabled ON alert_rules(enabled, metric, severity);
+    CREATE INDEX IF NOT EXISTS idx_governance_assignments_policy_pack ON governance_assignments(policy_pack_id);
+    CREATE INDEX IF NOT EXISTS idx_incident_bundles_created_at ON incident_bundles(created_at DESC);
   `)
 
   addColumnIfMissing(
@@ -219,6 +301,49 @@ const runMigrations = (db: BetterSqlite3.Database): void => {
     'retry_abort_on_error_rate',
     'REAL NOT NULL DEFAULT 1',
   )
+  addColumnIfMissing(
+    db,
+    'workflow_executions',
+    'checkpoint_token',
+    'TEXT',
+  )
+  addColumnIfMissing(
+    db,
+    'workflow_executions',
+    'policy_pack_id',
+    'TEXT',
+  )
+  addColumnIfMissing(
+    db,
+    'workflow_executions',
+    'schedule_window_id',
+    'TEXT',
+  )
+  addColumnIfMissing(
+    db,
+    'workflow_executions',
+    'resumed_from_execution_id',
+    'TEXT',
+  )
+
+  const upsertRetentionDefaults = db.prepare(`
+    INSERT INTO retention_policies (
+      dataset,
+      retention_days,
+      storage_budget_mb,
+      auto_purge_oldest
+    ) VALUES (?, ?, ?, ?)
+    ON CONFLICT(dataset) DO NOTHING
+  `)
+
+  for (const dataset of [
+    'timelineEvents',
+    'observabilitySnapshots',
+    'workflowHistory',
+    'incidentArtifacts',
+  ]) {
+    upsertRetentionDefaults.run(dataset, 30, 512, 1)
+  }
 }
 
 type ConnectionRow = {
@@ -866,6 +991,10 @@ type WorkflowExecutionRow = {
   dry_run: 0 | 1
   parameters_json: string
   step_results_json: string
+  checkpoint_token: string | null
+  policy_pack_id: string | null
+  schedule_window_id: string | null
+  resumed_from_execution_id: string | null
   error_message: string | null
 }
 
@@ -884,6 +1013,10 @@ const rowToWorkflowExecution = (
   dryRun: row.dry_run === 1,
   parameters: parseJson(row.parameters_json, {}),
   stepResults: parseJson<WorkflowStepResult[]>(row.step_results_json, []),
+  checkpointToken: row.checkpoint_token ?? undefined,
+  policyPackId: row.policy_pack_id ?? undefined,
+  scheduleWindowId: row.schedule_window_id ?? undefined,
+  resumedFromExecutionId: row.resumed_from_execution_id ?? undefined,
   errorMessage: row.error_message ?? undefined,
 })
 
@@ -903,6 +1036,10 @@ export class SqliteWorkflowExecutionRepository
     number,
     string,
     string,
+    string | null,
+    string | null,
+    string | null,
+    string | null,
     string | null,
   ]>
 
@@ -946,8 +1083,12 @@ export class SqliteWorkflowExecutionRepository
         dry_run,
         parameters_json,
         step_results_json,
+        checkpoint_token,
+        policy_pack_id,
+        schedule_window_id,
+        resumed_from_execution_id,
         error_message
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         workflow_template_id = excluded.workflow_template_id,
         workflow_name = excluded.workflow_name,
@@ -960,6 +1101,10 @@ export class SqliteWorkflowExecutionRepository
         dry_run = excluded.dry_run,
         parameters_json = excluded.parameters_json,
         step_results_json = excluded.step_results_json,
+        checkpoint_token = excluded.checkpoint_token,
+        policy_pack_id = excluded.policy_pack_id,
+        schedule_window_id = excluded.schedule_window_id,
+        resumed_from_execution_id = excluded.resumed_from_execution_id,
         error_message = excluded.error_message
     `)
 
@@ -977,6 +1122,10 @@ export class SqliteWorkflowExecutionRepository
         dry_run,
         parameters_json,
         step_results_json,
+        checkpoint_token,
+        policy_pack_id,
+        schedule_window_id,
+        resumed_from_execution_id,
         error_message
       FROM workflow_executions
     `
@@ -1030,6 +1179,10 @@ export class SqliteWorkflowExecutionRepository
       record.dryRun ? 1 : 0,
       JSON.stringify(record.parameters),
       JSON.stringify(record.stepResults),
+      record.checkpointToken ?? null,
+      record.policyPackId ?? null,
+      record.scheduleWindowId ?? null,
+      record.resumedFromExecutionId ?? null,
       record.errorMessage ?? null,
     )
   }
@@ -1424,6 +1577,736 @@ export class SqliteAlertRepository implements AlertRepository {
 
   public async markRead(id: string): Promise<void> {
     this.markReadStatement.run(id)
+  }
+}
+
+type AlertRuleRow = {
+  id: string
+  name: string
+  metric: AlertRule['metric']
+  threshold: number
+  lookback_minutes: number
+  severity: AlertRule['severity']
+  connection_id: string | null
+  environment: AlertRule['environment']
+  enabled: 0 | 1
+  created_at: string
+  updated_at: string
+}
+
+const rowToAlertRule = (row: AlertRuleRow): AlertRule => ({
+  id: row.id,
+  name: row.name,
+  metric: row.metric,
+  threshold: row.threshold,
+  lookbackMinutes: row.lookback_minutes,
+  severity: row.severity,
+  connectionId: row.connection_id ?? undefined,
+  environment: row.environment ?? undefined,
+  enabled: row.enabled === 1,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+})
+
+export class SqliteAlertRuleRepository implements AlertRuleRepository {
+  private readonly listStatement: BetterSqlite3.Statement<[], AlertRuleRow>
+
+  private readonly findByIdStatement: BetterSqlite3.Statement<[string], AlertRuleRow>
+
+  private readonly saveStatement: BetterSqlite3.Statement<[
+    string,
+    string,
+    string,
+    number,
+    number,
+    string,
+    string | null,
+    string | null,
+    number,
+    string,
+    string,
+  ]>
+
+  private readonly deleteStatement: BetterSqlite3.Statement<[string]>
+
+  public constructor(private readonly db: BetterSqlite3.Database) {
+    this.listStatement = this.db.prepare(`
+      SELECT
+        id,
+        name,
+        metric,
+        threshold,
+        lookback_minutes,
+        severity,
+        connection_id,
+        environment,
+        enabled,
+        created_at,
+        updated_at
+      FROM alert_rules
+      ORDER BY updated_at DESC
+    `)
+
+    this.findByIdStatement = this.db.prepare(`
+      SELECT
+        id,
+        name,
+        metric,
+        threshold,
+        lookback_minutes,
+        severity,
+        connection_id,
+        environment,
+        enabled,
+        created_at,
+        updated_at
+      FROM alert_rules
+      WHERE id = ?
+      LIMIT 1
+    `)
+
+    this.saveStatement = this.db.prepare(`
+      INSERT INTO alert_rules (
+        id,
+        name,
+        metric,
+        threshold,
+        lookback_minutes,
+        severity,
+        connection_id,
+        environment,
+        enabled,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        metric = excluded.metric,
+        threshold = excluded.threshold,
+        lookback_minutes = excluded.lookback_minutes,
+        severity = excluded.severity,
+        connection_id = excluded.connection_id,
+        environment = excluded.environment,
+        enabled = excluded.enabled,
+        updated_at = excluded.updated_at
+    `)
+
+    this.deleteStatement = this.db.prepare('DELETE FROM alert_rules WHERE id = ?')
+  }
+
+  public async list(): Promise<AlertRule[]> {
+    return this.listStatement.all().map(rowToAlertRule)
+  }
+
+  public async findById(id: string): Promise<AlertRule | null> {
+    const row = this.findByIdStatement.get(id)
+    return row ? rowToAlertRule(row) : null
+  }
+
+  public async save(rule: AlertRule): Promise<void> {
+    this.saveStatement.run(
+      rule.id,
+      rule.name,
+      rule.metric,
+      rule.threshold,
+      rule.lookbackMinutes,
+      rule.severity,
+      rule.connectionId ?? null,
+      rule.environment ?? null,
+      rule.enabled ? 1 : 0,
+      rule.createdAt,
+      rule.updatedAt,
+    )
+  }
+
+  public async delete(id: string): Promise<void> {
+    this.deleteStatement.run(id)
+  }
+}
+
+type GovernancePolicyPackRow = {
+  id: string
+  name: string
+  description: string | null
+  environments_json: string
+  max_workflow_items: number
+  max_retry_attempts: number
+  scheduling_enabled: 0 | 1
+  execution_windows_json: string
+  enabled: 0 | 1
+  created_at: string
+  updated_at: string
+}
+
+const rowToGovernancePolicyPack = (
+  row: GovernancePolicyPackRow,
+): GovernancePolicyPack => ({
+  id: row.id,
+  name: row.name,
+  description: row.description ?? undefined,
+  environments: parseJson(row.environments_json, ['dev']),
+  maxWorkflowItems: row.max_workflow_items,
+  maxRetryAttempts: row.max_retry_attempts,
+  schedulingEnabled: row.scheduling_enabled === 1,
+  executionWindows: parseJson(row.execution_windows_json, []),
+  enabled: row.enabled === 1,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+})
+
+export class SqliteGovernancePolicyPackRepository
+  implements GovernancePolicyPackRepository
+{
+  private readonly listStatement: BetterSqlite3.Statement<
+    [],
+    GovernancePolicyPackRow
+  >
+
+  private readonly findByIdStatement: BetterSqlite3.Statement<
+    [string],
+    GovernancePolicyPackRow
+  >
+
+  private readonly saveStatement: BetterSqlite3.Statement<[
+    string,
+    string,
+    string | null,
+    string,
+    number,
+    number,
+    number,
+    string,
+    number,
+    string,
+    string,
+  ]>
+
+  private readonly deleteStatement: BetterSqlite3.Statement<[string]>
+
+  public constructor(private readonly db: BetterSqlite3.Database) {
+    this.listStatement = this.db.prepare(`
+      SELECT
+        id,
+        name,
+        description,
+        environments_json,
+        max_workflow_items,
+        max_retry_attempts,
+        scheduling_enabled,
+        execution_windows_json,
+        enabled,
+        created_at,
+        updated_at
+      FROM governance_policy_packs
+      ORDER BY updated_at DESC
+    `)
+
+    this.findByIdStatement = this.db.prepare(`
+      SELECT
+        id,
+        name,
+        description,
+        environments_json,
+        max_workflow_items,
+        max_retry_attempts,
+        scheduling_enabled,
+        execution_windows_json,
+        enabled,
+        created_at,
+        updated_at
+      FROM governance_policy_packs
+      WHERE id = ?
+      LIMIT 1
+    `)
+
+    this.saveStatement = this.db.prepare(`
+      INSERT INTO governance_policy_packs (
+        id,
+        name,
+        description,
+        environments_json,
+        max_workflow_items,
+        max_retry_attempts,
+        scheduling_enabled,
+        execution_windows_json,
+        enabled,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        description = excluded.description,
+        environments_json = excluded.environments_json,
+        max_workflow_items = excluded.max_workflow_items,
+        max_retry_attempts = excluded.max_retry_attempts,
+        scheduling_enabled = excluded.scheduling_enabled,
+        execution_windows_json = excluded.execution_windows_json,
+        enabled = excluded.enabled,
+        updated_at = excluded.updated_at
+    `)
+
+    this.deleteStatement = this.db.prepare(
+      'DELETE FROM governance_policy_packs WHERE id = ?',
+    )
+  }
+
+  public async list(): Promise<GovernancePolicyPack[]> {
+    return this.listStatement.all().map(rowToGovernancePolicyPack)
+  }
+
+  public async findById(id: string): Promise<GovernancePolicyPack | null> {
+    const row = this.findByIdStatement.get(id)
+    return row ? rowToGovernancePolicyPack(row) : null
+  }
+
+  public async save(policyPack: GovernancePolicyPack): Promise<void> {
+    this.saveStatement.run(
+      policyPack.id,
+      policyPack.name,
+      policyPack.description ?? null,
+      JSON.stringify(policyPack.environments),
+      policyPack.maxWorkflowItems,
+      policyPack.maxRetryAttempts,
+      policyPack.schedulingEnabled ? 1 : 0,
+      JSON.stringify(policyPack.executionWindows),
+      policyPack.enabled ? 1 : 0,
+      policyPack.createdAt,
+      policyPack.updatedAt,
+    )
+  }
+
+  public async delete(id: string): Promise<void> {
+    this.deleteStatement.run(id)
+  }
+}
+
+type GovernanceAssignmentRow = {
+  connection_id: string
+  policy_pack_id: string | null
+}
+
+export class SqliteGovernanceAssignmentRepository
+  implements GovernanceAssignmentRepository
+{
+  private readonly listStatement: BetterSqlite3.Statement<[], GovernanceAssignmentRow>
+
+  private readonly listByConnectionStatement: BetterSqlite3.Statement<
+    [string],
+    GovernanceAssignmentRow
+  >
+
+  private readonly upsertStatement: BetterSqlite3.Statement<
+    [string, string, string]
+  >
+
+  private readonly clearStatement: BetterSqlite3.Statement<[string]>
+
+  public constructor(private readonly db: BetterSqlite3.Database) {
+    this.listStatement = this.db.prepare(`
+      SELECT
+        connection_id,
+        policy_pack_id
+      FROM governance_assignments
+      ORDER BY assigned_at DESC
+    `)
+
+    this.listByConnectionStatement = this.db.prepare(`
+      SELECT
+        connection_id,
+        policy_pack_id
+      FROM governance_assignments
+      WHERE connection_id = ?
+      LIMIT 1
+    `)
+
+    this.upsertStatement = this.db.prepare(`
+      INSERT INTO governance_assignments (
+        connection_id,
+        policy_pack_id,
+        assigned_at
+      ) VALUES (?, ?, ?)
+      ON CONFLICT(connection_id) DO UPDATE SET
+        policy_pack_id = excluded.policy_pack_id,
+        assigned_at = excluded.assigned_at
+    `)
+
+    this.clearStatement = this.db.prepare(
+      'DELETE FROM governance_assignments WHERE connection_id = ?',
+    )
+  }
+
+  public async list(
+    args: GovernanceAssignmentListRequest,
+  ): Promise<GovernanceAssignment[]> {
+    const rows = args.connectionId
+      ? this.listByConnectionStatement.all(args.connectionId)
+      : this.listStatement.all()
+
+    return rows.map((row) => ({
+      connectionId: row.connection_id,
+      policyPackId: row.policy_pack_id ?? undefined,
+    }))
+  }
+
+  public async assign(args: {
+    connectionId: string
+    policyPackId?: string
+  }): Promise<void> {
+    if (!args.policyPackId) {
+      this.clearStatement.run(args.connectionId)
+      return
+    }
+
+    this.upsertStatement.run(
+      args.connectionId,
+      args.policyPackId,
+      new Date().toISOString(),
+    )
+  }
+}
+
+type IncidentBundleRow = {
+  id: string
+  created_at: string
+  from_ts: string
+  to_ts: string
+  connection_ids_json: string
+  includes_json: string
+  redaction_profile: IncidentBundle['redactionProfile']
+  checksum: string
+  artifact_path: string
+  timeline_count: number
+  log_count: number
+  diagnostic_count: number
+  metric_count: number
+}
+
+const rowToIncidentBundle = (row: IncidentBundleRow): IncidentBundle => ({
+  id: row.id,
+  createdAt: row.created_at,
+  from: row.from_ts,
+  to: row.to_ts,
+  connectionIds: parseJson(row.connection_ids_json, []),
+  includes: parseJson(row.includes_json, []),
+  redactionProfile: row.redaction_profile,
+  checksum: row.checksum,
+  artifactPath: row.artifact_path,
+  timelineCount: row.timeline_count,
+  logCount: row.log_count,
+  diagnosticCount: row.diagnostic_count,
+  metricCount: row.metric_count,
+})
+
+export class SqliteIncidentBundleRepository implements IncidentBundleRepository {
+  private readonly saveStatement: BetterSqlite3.Statement<[
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+    number,
+    number,
+    number,
+    number,
+  ]>
+
+  private readonly listStatement: BetterSqlite3.Statement<
+    [number],
+    IncidentBundleRow
+  >
+
+  public constructor(private readonly db: BetterSqlite3.Database) {
+    this.saveStatement = this.db.prepare(`
+      INSERT INTO incident_bundles (
+        id,
+        created_at,
+        from_ts,
+        to_ts,
+        connection_ids_json,
+        includes_json,
+        redaction_profile,
+        checksum,
+        artifact_path,
+        timeline_count,
+        log_count,
+        diagnostic_count,
+        metric_count
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        created_at = excluded.created_at,
+        from_ts = excluded.from_ts,
+        to_ts = excluded.to_ts,
+        connection_ids_json = excluded.connection_ids_json,
+        includes_json = excluded.includes_json,
+        redaction_profile = excluded.redaction_profile,
+        checksum = excluded.checksum,
+        artifact_path = excluded.artifact_path,
+        timeline_count = excluded.timeline_count,
+        log_count = excluded.log_count,
+        diagnostic_count = excluded.diagnostic_count,
+        metric_count = excluded.metric_count
+    `)
+
+    this.listStatement = this.db.prepare(`
+      SELECT
+        id,
+        created_at,
+        from_ts,
+        to_ts,
+        connection_ids_json,
+        includes_json,
+        redaction_profile,
+        checksum,
+        artifact_path,
+        timeline_count,
+        log_count,
+        diagnostic_count,
+        metric_count
+      FROM incident_bundles
+      ORDER BY created_at DESC
+      LIMIT ?
+    `)
+  }
+
+  public async save(bundle: IncidentBundle): Promise<void> {
+    this.saveStatement.run(
+      bundle.id,
+      bundle.createdAt,
+      bundle.from,
+      bundle.to,
+      JSON.stringify(bundle.connectionIds),
+      JSON.stringify(bundle.includes),
+      bundle.redactionProfile,
+      bundle.checksum,
+      bundle.artifactPath,
+      bundle.timelineCount,
+      bundle.logCount,
+      bundle.diagnosticCount,
+      bundle.metricCount,
+    )
+  }
+
+  public async list(limit: number): Promise<IncidentBundle[]> {
+    return this.listStatement.all(limit).map(rowToIncidentBundle)
+  }
+}
+
+type RetentionPolicyRow = {
+  dataset: RetentionPolicy['dataset']
+  retention_days: number
+  storage_budget_mb: number
+  auto_purge_oldest: 0 | 1
+}
+
+const rowToRetentionPolicy = (row: RetentionPolicyRow): RetentionPolicy => ({
+  dataset: row.dataset,
+  retentionDays: row.retention_days,
+  storageBudgetMb: row.storage_budget_mb,
+  autoPurgeOldest: row.auto_purge_oldest === 1,
+})
+
+const bytesPerRowEstimateByDataset: Record<RetentionPolicy['dataset'], number> = {
+  timelineEvents: 640,
+  observabilitySnapshots: 420,
+  workflowHistory: 860,
+  incidentArtifacts: 1280,
+}
+
+const retentionDatasetTableMap: Record<
+  RetentionPolicy['dataset'],
+  { table: string; timestampColumn: string }
+> = {
+  timelineEvents: {
+    table: 'history_events',
+    timestampColumn: 'timestamp',
+  },
+  observabilitySnapshots: {
+    table: 'observability_snapshots',
+    timestampColumn: 'timestamp',
+  },
+  workflowHistory: {
+    table: 'workflow_executions',
+    timestampColumn: 'started_at',
+  },
+  incidentArtifacts: {
+    table: 'incident_bundles',
+    timestampColumn: 'created_at',
+  },
+}
+
+export class SqliteRetentionRepository implements RetentionRepository {
+  private readonly listPoliciesStatement: BetterSqlite3.Statement<
+    [],
+    RetentionPolicyRow
+  >
+
+  private readonly savePolicyStatement: BetterSqlite3.Statement<
+    [string, number, number, number]
+  >
+
+  private readonly findPolicyByDatasetStatement: BetterSqlite3.Statement<
+    [string],
+    RetentionPolicyRow
+  >
+
+  public constructor(private readonly db: BetterSqlite3.Database) {
+    this.listPoliciesStatement = this.db.prepare(`
+      SELECT
+        dataset,
+        retention_days,
+        storage_budget_mb,
+        auto_purge_oldest
+      FROM retention_policies
+      ORDER BY dataset ASC
+    `)
+
+    this.findPolicyByDatasetStatement = this.db.prepare(`
+      SELECT
+        dataset,
+        retention_days,
+        storage_budget_mb,
+        auto_purge_oldest
+      FROM retention_policies
+      WHERE dataset = ?
+      LIMIT 1
+    `)
+
+    this.savePolicyStatement = this.db.prepare(`
+      INSERT INTO retention_policies (
+        dataset,
+        retention_days,
+        storage_budget_mb,
+        auto_purge_oldest
+      ) VALUES (?, ?, ?, ?)
+      ON CONFLICT(dataset) DO UPDATE SET
+        retention_days = excluded.retention_days,
+        storage_budget_mb = excluded.storage_budget_mb,
+        auto_purge_oldest = excluded.auto_purge_oldest
+    `)
+  }
+
+  public async listPolicies(): Promise<RetentionPolicy[]> {
+    return this.listPoliciesStatement.all().map(rowToRetentionPolicy)
+  }
+
+  public async savePolicy(policy: RetentionPolicy): Promise<void> {
+    this.savePolicyStatement.run(
+      policy.dataset,
+      policy.retentionDays,
+      policy.storageBudgetMb,
+      policy.autoPurgeOldest ? 1 : 0,
+    )
+  }
+
+  public async purge(
+    request: RetentionPurgeRequest,
+  ): Promise<RetentionPurgeResult> {
+    const datasetConfig = retentionDatasetTableMap[request.dataset]
+    const policyRow = this.findPolicyByDatasetStatement.get(request.dataset)
+    const policy = policyRow
+      ? rowToRetentionPolicy(policyRow)
+      : {
+          dataset: request.dataset,
+          retentionDays: 30,
+          storageBudgetMb: 512,
+          autoPurgeOldest: true,
+        }
+
+    const cutoff =
+      request.olderThan ??
+      new Date(
+        Date.now() - policy.retentionDays * 24 * 60 * 60 * 1000,
+      ).toISOString()
+
+    const eligibleRow = this.db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM ${datasetConfig.table} WHERE ${datasetConfig.timestampColumn} < ?`,
+      )
+      .get(cutoff) as { count: number }
+
+    const eligibleRows = eligibleRow.count
+    const estimatedBytes =
+      eligibleRows * bytesPerRowEstimateByDataset[request.dataset]
+
+    if (request.dryRun) {
+      return {
+        dataset: request.dataset,
+        cutoff,
+        dryRun: true,
+        deletedRows: eligibleRows,
+        freedBytes: estimatedBytes,
+      }
+    }
+
+    const result = this.db
+      .prepare(
+        `DELETE FROM ${datasetConfig.table} WHERE ${datasetConfig.timestampColumn} < ?`,
+      )
+      .run(cutoff)
+
+    const deletedRows = Number(result.changes ?? 0)
+
+    return {
+      dataset: request.dataset,
+      cutoff,
+      dryRun: false,
+      deletedRows,
+      freedBytes: deletedRows * bytesPerRowEstimateByDataset[request.dataset],
+    }
+  }
+
+  public async getStorageSummary(): Promise<StorageSummary> {
+    const policies = await this.listPolicies()
+    const policyByDataset = new Map(
+      policies.map((policy) => [policy.dataset, policy]),
+    )
+
+    const datasets: StorageDatasetSummary[] = []
+    let totalBytes = 0
+
+    for (const [dataset, config] of Object.entries(retentionDatasetTableMap) as Array<
+      [RetentionPolicy['dataset'], { table: string; timestampColumn: string }]
+    >) {
+      const row = this.db
+        .prepare(
+          `SELECT COUNT(*) AS count, MIN(${config.timestampColumn}) AS oldest, MAX(${config.timestampColumn}) AS newest FROM ${config.table}`,
+        )
+        .get() as { count: number; oldest: string | null; newest: string | null }
+
+      const rowCount = Number(row.count ?? 0)
+      const totalDatasetBytes = rowCount * bytesPerRowEstimateByDataset[dataset]
+      const policy = policyByDataset.get(dataset) ?? {
+        dataset,
+        retentionDays: 30,
+        storageBudgetMb: 512,
+        autoPurgeOldest: true,
+      }
+      const budgetBytes = policy.storageBudgetMb * 1024 * 1024
+      const usageRatio = budgetBytes === 0 ? 0 : totalDatasetBytes / budgetBytes
+
+      datasets.push({
+        dataset,
+        rowCount,
+        totalBytes: totalDatasetBytes,
+        budgetBytes,
+        usageRatio: Number(usageRatio.toFixed(3)),
+        overBudget: totalDatasetBytes > budgetBytes,
+        oldestTimestamp: row.oldest ?? undefined,
+        newestTimestamp: row.newest ?? undefined,
+      })
+
+      totalBytes += totalDatasetBytes
+    }
+
+    return {
+      generatedAt: new Date().toISOString(),
+      datasets,
+      totalBytes,
+    }
   }
 }
 
