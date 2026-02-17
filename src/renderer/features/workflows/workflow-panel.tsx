@@ -315,12 +315,36 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
     },
   })
 
+  const resumeMutation = useMutation({
+    mutationFn: async (executionId: string) =>
+      unwrapResponse(
+        await window.cachify.resumeWorkflow({
+          executionId,
+          guardrailConfirmed: prodGuardrailConfirmed,
+        }),
+      ),
+    onSuccess: async (result) => {
+      toast.success(`Workflow resume ${result.status}.`)
+      await queryClient.invalidateQueries({
+        queryKey: ['workflow-executions', connection.id],
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ['observability-dashboard', connection.id],
+      })
+      await queryClient.invalidateQueries({ queryKey: ['alerts'] })
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Workflow resume failed.')
+    },
+  })
+
   const isBusy =
     saveTemplateMutation.isPending ||
     deleteTemplateMutation.isPending ||
     previewMutation.isPending ||
     executeMutation.isPending ||
-    rerunMutation.isPending
+    rerunMutation.isPending ||
+    resumeMutation.isPending
 
   return (
     <div className='grid min-h-0 gap-3 xl:grid-cols-[1fr_1fr]'>
@@ -625,7 +649,19 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
                       <span>steps: {execution.stepResults.length}</span>
                       <span>retries: {execution.retryCount}</span>
                       {execution.dryRun && <span>dry-run</span>}
+                      {execution.policyPackId && (
+                        <span>policy: {execution.policyPackId}</span>
+                      )}
+                      {execution.scheduleWindowId && (
+                        <span>window: {execution.scheduleWindowId}</span>
+                      )}
+                      {execution.checkpointToken && (
+                        <span>checkpoint: {execution.checkpointToken}</span>
+                      )}
                     </div>
+                    {execution.errorMessage && (
+                      <p className='text-muted-foreground'>{execution.errorMessage}</p>
+                    )}
                     <div className='flex flex-wrap gap-2'>
                       <Button
                         size='sm'
@@ -653,6 +689,16 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
                       >
                         Rerun With Edits
                       </Button>
+                      {execution.checkpointToken && execution.status !== 'success' && (
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          onClick={() => resumeMutation.mutate(execution.id)}
+                          disabled={isBusy}
+                        >
+                          Resume From Checkpoint
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}
