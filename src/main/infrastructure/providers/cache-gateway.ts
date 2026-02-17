@@ -1,4 +1,4 @@
-import memjs from 'memjs'
+import { Client as MemjsClient } from 'memjs'
 import { createClient, type RedisClientType } from 'redis'
 
 import type {
@@ -384,7 +384,7 @@ export class DefaultCacheGateway implements CacheGateway {
     profile: EngineConnection,
     secret: ConnectionSecret,
   ) {
-    return memjs.Client.create(`${profile.host}:${profile.port}`, {
+    return MemjsClient.create(`${profile.host}:${profile.port}`, {
       username: secret.username,
       password: secret.password,
       timeout: Math.max(0.1, profile.timeoutMs / 1000),
@@ -406,7 +406,9 @@ export class DefaultCacheGateway implements CacheGateway {
       return
     }
 
-    await client.disconnect().catch((_error: unknown): void => undefined)
+    await client.disconnect().catch((error: unknown): void => {
+      void error
+    })
   }
 }
 

@@ -134,12 +134,17 @@ export default function App() {
   const capabilitiesQuery = useQuery({
     queryKey: ['capabilities', selectedConnectionId],
     enabled: Boolean(selectedConnectionId),
-    queryFn: async () =>
-      unwrapResponse(
+    queryFn: async () => {
+      if (!selectedConnectionId) {
+        throw new Error('Connection is required to load capabilities.')
+      }
+
+      return unwrapResponse(
         await window.cachify.getCapabilities({
-          connectionId: selectedConnectionId!,
+          connectionId: selectedConnectionId,
         }),
-      ),
+      )
+    },
   })
 
   const capabilities = capabilitiesQuery.data ?? defaultCapabilities
@@ -177,13 +182,18 @@ export default function App() {
   const keyDetailQuery = useQuery({
     queryKey: ['key', selectedConnectionId, selectedKey],
     enabled: Boolean(selectedConnectionId && selectedKey),
-    queryFn: async (): Promise<KeyValueRecord> =>
-      unwrapResponse(
+    queryFn: async (): Promise<KeyValueRecord> => {
+      if (!selectedConnectionId || !selectedKey) {
+        throw new Error('Connection and key are required to load key detail.')
+      }
+
+      return unwrapResponse(
         await window.cachify.getKey({
-          connectionId: selectedConnectionId!,
-          key: selectedKey!,
+          connectionId: selectedConnectionId,
+          key: selectedKey,
         }),
-      ),
+      )
+    },
   })
 
   React.useEffect(() => {

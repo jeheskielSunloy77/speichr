@@ -2,7 +2,7 @@ import path from 'node:path'
 
 import { app, BrowserWindow } from 'electron'
 import started from 'electron-squirrel-startup'
-import type Database from 'better-sqlite3'
+import type BetterSqlite3 from 'better-sqlite3'
 
 import { CachifyService } from './application/cachify-service'
 import { DefaultCacheGateway } from './infrastructure/providers/cache-gateway'
@@ -20,7 +20,7 @@ if (started) {
 }
 
 type RuntimeContext = {
-  db: Database.Database
+  db: BetterSqlite3.Database
   service: CachifyService
 }
 

@@ -1,4 +1,4 @@
-import keytar from 'keytar'
+import { deletePassword, getPassword, setPassword } from 'keytar'
 
 import type { ConnectionSecret } from '../../../shared/contracts/cache'
 
@@ -14,11 +14,11 @@ export class KeytarSecretStore implements SecretStore {
   ): Promise<void> {
     const payload = JSON.stringify(secret)
 
-    await keytar.setPassword(SERVICE_NAME, profileId, payload)
+    await setPassword(SERVICE_NAME, profileId, payload)
   }
 
   public async getSecret(profileId: string): Promise<ConnectionSecret> {
-    const value = await keytar.getPassword(SERVICE_NAME, profileId)
+    const value = await getPassword(SERVICE_NAME, profileId)
 
     if (!value) {
       throw new OperationFailure(
@@ -45,6 +45,6 @@ export class KeytarSecretStore implements SecretStore {
   }
 
   public async deleteSecret(profileId: string): Promise<void> {
-    await keytar.deletePassword(SERVICE_NAME, profileId)
+    await deletePassword(SERVICE_NAME, profileId)
   }
 }

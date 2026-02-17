@@ -1,7 +1,7 @@
 import path from 'node:path'
 import fs from 'node:fs'
 
-import Database from 'better-sqlite3'
+import BetterSqlite3 from 'better-sqlite3'
 
 import type { ConnectionProfile } from '../../shared/contracts/cache'
 
@@ -15,10 +15,12 @@ const ensureDirectory = (dbPath: string): void => {
   fs.mkdirSync(directory, { recursive: true })
 }
 
-export const createSqliteDatabase = (dbPath: string): Database.Database => {
+export const createSqliteDatabase = (
+  dbPath: string,
+): BetterSqlite3.Database => {
   ensureDirectory(dbPath)
 
-  const db = new Database(dbPath)
+  const db = new BetterSqlite3(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
 
@@ -27,7 +29,7 @@ export const createSqliteDatabase = (dbPath: string): Database.Database => {
   return db
 }
 
-const runMigrations = (db: Database.Database): void => {
+const runMigrations = (db: BetterSqlite3.Database): void => {
   db.exec(`
     CREATE TABLE IF NOT EXISTS connection_profiles (
       id TEXT PRIMARY KEY,
@@ -95,11 +97,14 @@ const rowToConnectionProfile = (row: ConnectionRow): ConnectionProfile => ({
 })
 
 export class SqliteConnectionRepository implements ConnectionRepository {
-  private readonly listStatement: Database.Statement<[], ConnectionRow>
+  private readonly listStatement: BetterSqlite3.Statement<[], ConnectionRow>
 
-  private readonly findByIdStatement: Database.Statement<[string], ConnectionRow>
+  private readonly findByIdStatement: BetterSqlite3.Statement<
+    [string],
+    ConnectionRow
+  >
 
-  private readonly saveStatement: Database.Statement<[
+  private readonly saveStatement: BetterSqlite3.Statement<[
     string,
     string,
     'redis' | 'memcached',
@@ -116,9 +121,9 @@ export class SqliteConnectionRepository implements ConnectionRepository {
     string,
   ]>
 
-  private readonly deleteStatement: Database.Statement<[string]>
+  private readonly deleteStatement: BetterSqlite3.Statement<[string]>
 
-  public constructor(private readonly db: Database.Database) {
+  public constructor(private readonly db: BetterSqlite3.Database) {
     this.listStatement = this.db.prepare<[], ConnectionRow>(`
       SELECT
         id,
@@ -236,20 +241,27 @@ export class SqliteConnectionRepository implements ConnectionRepository {
 export class SqliteMemcachedKeyIndexRepository
   implements MemcachedKeyIndexRepository
 {
-  private readonly listStatement: Database.Statement<[string, number], { cache_key: string }>
+  private readonly listStatement: BetterSqlite3.Statement<
+    [string, number],
+    { cache_key: string }
+  >
 
-  private readonly searchStatement: Database.Statement<
+  private readonly searchStatement: BetterSqlite3.Statement<
     [string, string, number],
     { cache_key: string }
   >
 
-  private readonly upsertStatement: Database.Statement<[string, string, string]>
+  private readonly upsertStatement: BetterSqlite3.Statement<
+    [string, string, string]
+  >
 
-  private readonly removeStatement: Database.Statement<[string, string]>
+  private readonly removeStatement: BetterSqlite3.Statement<[string, string]>
 
-  private readonly removeByConnectionStatement: Database.Statement<[string]>
+  private readonly removeByConnectionStatement: BetterSqlite3.Statement<
+    [string]
+  >
 
-  public constructor(private readonly db: Database.Database) {
+  public constructor(private readonly db: BetterSqlite3.Database) {
     this.listStatement = this.db.prepare<[string, number], { cache_key: string }>(`
       SELECT cache_key
       FROM memcached_key_index
