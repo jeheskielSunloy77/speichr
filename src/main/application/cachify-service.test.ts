@@ -142,7 +142,12 @@ const createConnectionPayload = (): ConnectionCreateRequest => ({
     environment: 'dev',
     tags: ['local'],
     readOnly: false,
+    forceReadOnly: false,
     timeoutMs: 5000,
+    retryMaxAttempts: 2,
+    retryBackoffMs: 10,
+    retryBackoffStrategy: 'fixed',
+    retryAbortOnErrorRate: 1,
   },
   secret: {
     password: 'secret',
@@ -161,7 +166,12 @@ const createStoredProfile = (): ConnectionProfile => ({
   tags: [],
   secretRef: 'stored-1',
   readOnly: false,
+  forceReadOnly: false,
   timeoutMs: 5000,
+  retryMaxAttempts: 2,
+  retryBackoffMs: 10,
+  retryBackoffStrategy: 'fixed',
+  retryAbortOnErrorRate: 1,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 })
@@ -209,7 +219,12 @@ describe('CachifyService', () => {
       tags: [],
       secretRef: 'readonly-1',
       readOnly: true,
+      forceReadOnly: false,
       timeoutMs: 5000,
+      retryMaxAttempts: 2,
+      retryBackoffMs: 10,
+      retryBackoffStrategy: 'fixed',
+      retryAbortOnErrorRate: 1,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
@@ -339,5 +354,250 @@ describe('CachifyService', () => {
         token: 'stored-token',
       }),
     )
+  })
+
+  it('blocks writes when forced read-only policy is enabled', async () => {
+    const repository = new InMemoryConnectionRepository()
+    const secretStore = new InMemorySecretStore()
+    const memcachedIndex = new InMemoryMemcachedIndexRepository()
+    const setValueMock = vi.fn(async () => undefined)
+    const gateway = createGatewayMock({ setValue: setValueMock })
+
+    const profile: ConnectionProfile = {
+      ...createStoredProfile(),
+      id: 'forced-ro-1',
+      secretRef: 'forced-ro-1',
+      forceReadOnly: true,
+    }
+
+    await repository.save(profile)
+    await secretStore.saveSecret(profile.id, { password: 'secret' })
+
+    const service = new CachifyService(
+      repository,
+      secretStore,
+      memcachedIndex,
+      gateway,
+    )
+
+    await expect(
+      service.setKey({
+        connectionId: profile.id,
+        key: 'blocked:key',
+        value: 'value',
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: 'UNAUTHORIZED',
+      }),
+    )
+    expect(setValueMock).not.toHaveBeenCalled()
+  })
+
+  it('enforces prod guardrail for destructive deletes', async () => {
+    const repository = new InMemoryConnectionRepository()
+    const secretStore = new InMemorySecretStore()
+    const memcachedIndex = new InMemoryMemcachedIndexRepository()
+    const deleteKeyMock = vi.fn(async () => undefined)
+    const gateway = createGatewayMock({ deleteKey: deleteKeyMock })
+
+    const profile: ConnectionProfile = {
+      ...createStoredProfile(),
+      id: 'prod-1',
+      environment: 'prod',
+      secretRef: 'prod-1',
+    }
+
+    await repository.save(profile)
+    await secretStore.saveSecret(profile.id, { password: 'secret' })
+
+    const service = new CachifyService(
+      repository,
+      secretStore,
+      memcachedIndex,
+      gateway,
+    )
+
+    await expect(
+      service.deleteKey({
+        connectionId: profile.id,
+        key: 'prod:key',
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: 'UNAUTHORIZED',
+      }),
+    )
+
+    expect(deleteKeyMock).not.toHaveBeenCalled()
+
+    await expect(
+      service.deleteKey({
+        connectionId: profile.id,
+        key: 'prod:key',
+        guardrailConfirmed: true,
+      }),
+    ).resolves.toEqual({
+      success: true,
+    })
+
+    expect(deleteKeyMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('restores keys from latest snapshot records', async () => {
+    const repository = new InMemoryConnectionRepository()
+    const secretStore = new InMemorySecretStore()
+    const memcachedIndex = new InMemoryMemcachedIndexRepository()
+    const setValueMock = vi.fn(async () => undefined)
+    const getValueMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        key: 'user:1',
+        value: 'old-value',
+        ttlSeconds: 120,
+        supportsTTL: true,
+      })
+      .mockResolvedValueOnce({
+        key: 'user:1',
+        value: 'current-value',
+        ttlSeconds: 90,
+        supportsTTL: true,
+      })
+    const gateway = createGatewayMock({
+      getValue: getValueMock,
+      setValue: setValueMock,
+    })
+
+    const profile: ConnectionProfile = {
+      ...createStoredProfile(),
+      id: 'rollback-1',
+      secretRef: 'rollback-1',
+    }
+
+    await repository.save(profile)
+    await secretStore.saveSecret(profile.id, { password: 'secret' })
+
+    const service = new CachifyService(
+      repository,
+      secretStore,
+      memcachedIndex,
+      gateway,
+    )
+
+    await service.setKey({
+      connectionId: profile.id,
+      key: 'user:1',
+      value: 'new-value',
+      ttlSeconds: 30,
+    })
+
+    await service.restoreSnapshot({
+      connectionId: profile.id,
+      key: 'user:1',
+    })
+
+    expect(setValueMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      expect.objectContaining({
+        key: 'user:1',
+        value: 'old-value',
+        ttlSeconds: 120,
+      }),
+    )
+  })
+
+  it('executes workflow dry-runs without mutating keys and stores execution records', async () => {
+    const repository = new InMemoryConnectionRepository()
+    const secretStore = new InMemorySecretStore()
+    const memcachedIndex = new InMemoryMemcachedIndexRepository()
+    const deleteKeyMock = vi.fn(async () => undefined)
+    const searchKeysMock = vi.fn(async () => ({
+      keys: ['session:1', 'session:2'],
+      nextCursor: undefined,
+    }))
+    const gateway = createGatewayMock({
+      deleteKey: deleteKeyMock,
+      searchKeys: searchKeysMock,
+    })
+
+    const profile: ConnectionProfile = {
+      ...createStoredProfile(),
+      id: 'workflow-1',
+      secretRef: 'workflow-1',
+    }
+
+    await repository.save(profile)
+    await secretStore.saveSecret(profile.id, { password: 'secret' })
+
+    const service = new CachifyService(
+      repository,
+      secretStore,
+      memcachedIndex,
+      gateway,
+    )
+
+    const execution = await service.executeWorkflow({
+      connectionId: profile.id,
+      template: {
+        name: 'Delete sessions',
+        kind: 'deleteByPattern',
+        parameters: {
+          pattern: 'session:*',
+          limit: 50,
+        },
+        requiresApprovalOnProd: true,
+        supportsDryRun: true,
+      },
+      dryRun: true,
+    })
+
+    expect(execution.status).toBe('success')
+    expect(execution.dryRun).toBe(true)
+    expect(deleteKeyMock).not.toHaveBeenCalled()
+
+    const history = await service.listWorkflowExecutions({
+      connectionId: profile.id,
+      limit: 20,
+    })
+
+    expect(history).toHaveLength(1)
+    expect(history[0].id).toBe(execution.id)
+  })
+
+  it('creates policy alerts for blocked operations', async () => {
+    const repository = new InMemoryConnectionRepository()
+    const secretStore = new InMemorySecretStore()
+    const memcachedIndex = new InMemoryMemcachedIndexRepository()
+    const gateway = createGatewayMock()
+
+    const profile: ConnectionProfile = {
+      ...createStoredProfile(),
+      id: 'alert-1',
+      secretRef: 'alert-1',
+      forceReadOnly: true,
+    }
+
+    await repository.save(profile)
+    await secretStore.saveSecret(profile.id, { password: 'secret' })
+
+    const service = new CachifyService(
+      repository,
+      secretStore,
+      memcachedIndex,
+      gateway,
+    )
+
+    await expect(
+      service.setKey({
+        connectionId: profile.id,
+        key: 'alert:key',
+        value: 'value',
+      }),
+    ).rejects.toBeInstanceOf(OperationFailure)
+
+    const alerts = await service.listAlerts({ limit: 20, unreadOnly: false })
+    expect(alerts.length).toBeGreaterThan(0)
+    expect(alerts[0].source).toBe('policy')
   })
 })
