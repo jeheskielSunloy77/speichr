@@ -269,6 +269,19 @@ export default function App() {
     },
   })
 
+  const unreadAlertsQuery = useQuery({
+    queryKey: ['alerts', 'unread-count'],
+    queryFn: async () =>
+      unwrapResponse(
+        await window.cachify.listAlerts({
+          unreadOnly: true,
+          limit: 200,
+        }),
+      ),
+  })
+
+  const unreadAlertCount = unreadAlertsQuery.data?.length ?? 0
+
   const capabilitiesError = getQueryErrorState(capabilitiesQuery.error)
   const keyListError = getQueryErrorState(keyListQuery.error)
   const keyDetailError = getQueryErrorState(keyDetailQuery.error)
@@ -646,10 +659,17 @@ export default function App() {
                   <p className='text-muted-foreground truncate text-xs'>
                     {selectedConnection.host}:{selectedConnection.port}
                   </p>
+                  <p className='text-muted-foreground truncate text-xs'>
+                    timeout: {selectedConnection.timeoutMs}ms | retry:{' '}
+                    {selectedConnection.retryMaxAttempts ?? 1}x (
+                    {selectedConnection.retryBackoffStrategy ?? 'fixed'})
+                  </p>
                 </div>
                 <div className='text-muted-foreground text-xs'>
                   {selectedConnection.engine === 'memcached' &&
                     'Memcached key search is based on app-indexed keys.'}
+                  {selectedConnection.environment === 'prod' &&
+                    ' Prod guardrails are active.'}
                 </div>
               </CardContent>
             </Card>
@@ -687,7 +707,10 @@ export default function App() {
                 <TabsTrigger value='workspace'>Workspace</TabsTrigger>
                 <TabsTrigger value='workflows'>Workflows</TabsTrigger>
                 <TabsTrigger value='observability'>Observability</TabsTrigger>
-                <TabsTrigger value='alerts'>Alerts</TabsTrigger>
+                <TabsTrigger value='alerts'>
+                  Alerts
+                  {unreadAlertCount > 0 ? ` (${unreadAlertCount})` : ''}
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value='workspace' className='min-h-0'>
