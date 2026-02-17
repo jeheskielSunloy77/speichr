@@ -14,7 +14,30 @@ export const useUiStore = create<UiState>((set) => ({
   selectedKey: null,
   isSettingsOpen: false,
   setSelectedConnectionId: (selectedConnectionId) =>
-    set({ selectedConnectionId, selectedKey: null }),
-  setSelectedKey: (selectedKey) => set({ selectedKey }),
-  setSettingsOpen: (isSettingsOpen) => set({ isSettingsOpen }),
+    set((state) => {
+      if (
+        state.selectedConnectionId === selectedConnectionId &&
+        state.selectedKey === null
+      ) {
+        return state
+      }
+
+      return { selectedConnectionId, selectedKey: null }
+    }),
+  setSelectedKey: (selectedKey) =>
+    set((state) => {
+      if (state.selectedKey === selectedKey) {
+        return state
+      }
+
+      return { selectedKey }
+    }),
+  setSettingsOpen: (isSettingsOpen) =>
+    set((state) => {
+      if (state.isSettingsOpen === isSettingsOpen) {
+        return state
+      }
+
+      return { isSettingsOpen }
+    }),
 }))
