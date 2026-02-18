@@ -226,10 +226,44 @@ export const GovernancePanel = ({ connection }: GovernancePanelProps) => {
     RetentionPolicy['dataset']
   >('timelineEvents')
   const [purgeOlderThan, setPurgeOlderThan] = React.useState('')
-  const [purgeDryRun, setPurgeDryRun] = React.useState(true)
+  const [purgePreviewResult, setPurgePreviewResult] = React.useState<
+    RetentionPurgeResult | null
+  >(null)
+  const [purgePreviewSignature, setPurgePreviewSignature] = React.useState<
+    string | null
+  >(null)
+  const [purgeConfirmationText, setPurgeConfirmationText] = React.useState('')
   const [lastPurgeResult, setLastPurgeResult] = React.useState<
     RetentionPurgeResult | null
   >(null)
+
+  const purgeRequestSignature = React.useMemo(
+    () => `${purgeDataset}::${purgeOlderThan.trim()}`,
+    [purgeDataset, purgeOlderThan],
+  )
+  const requiredPurgeConfirmation = React.useMemo(
+    () => `PURGE ${purgeDataset}`,
+    [purgeDataset],
+  )
+
+  const resolvePurgeOlderThanIso = React.useCallback((): string | undefined => {
+    if (purgeOlderThan.trim().length === 0) {
+      return undefined
+    }
+
+    const parsed = new Date(purgeOlderThan)
+    if (Number.isNaN(parsed.getTime())) {
+      throw new Error('Please provide a valid purge cutoff date/time.')
+    }
+
+    return parsed.toISOString()
+  }, [purgeOlderThan])
+
+  React.useEffect(() => {
+    setPurgePreviewResult(null)
+    setPurgePreviewSignature(null)
+    setPurgeConfirmationText('')
+  }, [purgeRequestSignature])
 
   const policyPacksQuery = useQuery({
     queryKey: ['policy-packs'],
@@ -371,25 +405,59 @@ export const GovernancePanel = ({ connection }: GovernancePanelProps) => {
     },
   })
 
-  const purgeMutation = useMutation({
+  const purgePreviewMutation = useMutation({
     mutationFn: async () =>
       unwrapResponse(
         await window.cachify.purgeRetentionData({
           dataset: purgeDataset,
-          olderThan:
-            purgeOlderThan.trim().length > 0
-              ? new Date(purgeOlderThan).toISOString()
-              : undefined,
-          dryRun: purgeDryRun,
+          olderThan: resolvePurgeOlderThanIso(),
+          dryRun: true,
         }),
       ),
     onSuccess: async (result) => {
-      setLastPurgeResult(result)
-      toast.success(
-        result.dryRun
-          ? 'Retention purge dry-run completed.'
-          : 'Retention purge completed.',
+      setPurgePreviewResult(result)
+      setPurgePreviewSignature(purgeRequestSignature)
+      toast.success('Purge impact preview generated.')
+      await queryClient.invalidateQueries({ queryKey: ['storage-summary'] })
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Unable to preview purge impact.',
       )
+    },
+  })
+
+  const purgeExecuteMutation = useMutation({
+    mutationFn: async () => {
+      if (
+        !purgePreviewResult ||
+        purgePreviewSignature !== purgeRequestSignature
+      ) {
+        throw new Error(
+          'Preview purge impact first for the current dataset/cutoff before executing.',
+        )
+      }
+
+      if (purgeConfirmationText.trim() !== requiredPurgeConfirmation) {
+        throw new Error(
+          `Type "${requiredPurgeConfirmation}" to confirm this purge operation.`,
+        )
+      }
+
+      return unwrapResponse(
+        await window.cachify.purgeRetentionData({
+          dataset: purgeDataset,
+          olderThan: resolvePurgeOlderThanIso(),
+          dryRun: false,
+        }),
+      )
+    },
+    onSuccess: async (result) => {
+      setLastPurgeResult(result)
+      setPurgePreviewResult(null)
+      setPurgePreviewSignature(null)
+      setPurgeConfirmationText('')
+      toast.success('Retention purge completed.')
       await queryClient.invalidateQueries({ queryKey: ['storage-summary'] })
     },
     onError: (error) => {
@@ -738,21 +806,37 @@ export const GovernancePanel = ({ connection }: GovernancePanelProps) => {
                 value={purgeOlderThan}
                 onChange={(event) => setPurgeOlderThan(event.target.value)}
               />
-              <label className='flex items-center gap-2 text-xs'>
-                <Checkbox
-                  checked={purgeDryRun}
-                  onCheckedChange={(checked) => setPurgeDryRun(Boolean(checked))}
-                />
-                dry-run only
-              </label>
+              <Input
+                value={purgeConfirmationText}
+                onChange={(event) => setPurgeConfirmationText(event.target.value)}
+                placeholder={`Type "${requiredPurgeConfirmation}"`}
+              />
             </div>
+            <p className='text-muted-foreground text-xs'>
+              Run impact preview first, then type <strong>{requiredPurgeConfirmation}</strong>{' '}
+              to enable destructive purge execution.
+            </p>
             <div className='flex flex-wrap gap-2'>
               <Button
                 variant='outline'
-                onClick={() => purgeMutation.mutate()}
-                disabled={purgeMutation.isPending}
+                onClick={() => purgePreviewMutation.mutate()}
+                disabled={purgePreviewMutation.isPending || purgeExecuteMutation.isPending}
               >
-                Run Purge
+                Preview Impact
+              </Button>
+              <Button
+                variant='outline'
+                onClick={() => purgeExecuteMutation.mutate()}
+                disabled={
+                  purgeExecuteMutation.isPending ||
+                  purgePreviewMutation.isPending ||
+                  !purgePreviewResult ||
+                  purgePreviewSignature !== purgeRequestSignature ||
+                  purgePreviewResult.deletedRows === 0 ||
+                  purgeConfirmationText.trim() !== requiredPurgeConfirmation
+                }
+              >
+                Execute Purge
               </Button>
               <Button
                 variant='outline'
@@ -764,11 +848,26 @@ export const GovernancePanel = ({ connection }: GovernancePanelProps) => {
               </Button>
             </div>
 
+            {purgePreviewResult && (
+              <div className='rounded-none border p-2 text-xs'>
+                <p className='font-medium'>Impact Preview</p>
+                <p>dataset: {purgePreviewResult.dataset}</p>
+                <p>cutoff: {new Date(purgePreviewResult.cutoff).toLocaleString()}</p>
+                <p>deleted rows: {purgePreviewResult.deletedRows}</p>
+                <p>freed bytes: {purgePreviewResult.freedBytes}</p>
+                {purgePreviewResult.deletedRows === 0 ? (
+                  <p className='text-muted-foreground'>
+                    No matching rows found for this purge filter.
+                  </p>
+                ) : null}
+              </div>
+            )}
+
             {lastPurgeResult && (
               <div className='rounded-none border p-2 text-xs'>
+                <p className='font-medium'>Last Purge Execution</p>
                 <p>dataset: {lastPurgeResult.dataset}</p>
                 <p>cutoff: {new Date(lastPurgeResult.cutoff).toLocaleString()}</p>
-                <p>dry-run: {lastPurgeResult.dryRun ? 'yes' : 'no'}</p>
                 <p>deleted rows: {lastPurgeResult.deletedRows}</p>
                 <p>freed bytes: {lastPurgeResult.freedBytes}</p>
               </div>

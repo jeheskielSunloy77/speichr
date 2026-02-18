@@ -13,6 +13,7 @@ import type {
 
 import type {
   CacheGateway,
+  EngineEventPollResult,
   MemcachedKeyIndexRepository,
 } from '../../application/ports'
 import { OperationFailure } from '../../domain/operation-failure'
@@ -20,7 +21,7 @@ import { OperationFailure } from '../../domain/operation-failure'
 const REDIS_CAPABILITIES: ProviderCapabilities = {
   supportsTTL: true,
   supportsMonitorStream: false,
-  supportsSlowLog: false,
+  supportsSlowLog: true,
   supportsBulkDeletePreview: false,
   supportsSnapshotRestore: false,
   supportsPatternScan: true,
@@ -180,6 +181,75 @@ export class DefaultCacheGateway implements CacheGateway {
       throw this.toConnectionFailure(error)
     } finally {
       client.quit()
+    }
+  }
+
+  public async pollEngineEvents(
+    profile: ConnectionProfile,
+    secret: ConnectionSecret,
+    args: { cursor?: string; limit: number },
+  ): Promise<EngineEventPollResult> {
+    if (profile.engine !== 'redis') {
+      return {
+        events: [],
+        nextCursor: args.cursor,
+      }
+    }
+
+    const client = this.createRedisClient(profile, secret)
+    const sinceIdRaw = Number(args.cursor)
+    const sinceId = Number.isFinite(sinceIdRaw) ? sinceIdRaw : -1
+    const limit = Math.min(256, Math.max(1, args.limit))
+
+    try {
+      await client.connect()
+
+      const rawEntries = await client.sendCommand([
+        'SLOWLOG',
+        'GET',
+        String(limit),
+      ])
+      if (!Array.isArray(rawEntries)) {
+        return {
+          events: [],
+          nextCursor: args.cursor,
+        }
+      }
+
+      const parsedEntries = rawEntries
+        .map((entry) => parseRedisSlowLogEntry(entry))
+        .filter((entry): entry is RedisSlowLogEntry => Boolean(entry))
+        .filter((entry) => entry.id > sinceId)
+        .sort((left, right) => left.id - right.id)
+
+      const events = parsedEntries.map((entry) => ({
+        timestamp: new Date(entry.startedAtSeconds * 1000).toISOString(),
+        connectionId: profile.id,
+        environment: profile.environment,
+        action: `redis.slowlog.${entry.command.toLowerCase()}`,
+        keyOrPattern: entry.keyOrPattern,
+        durationMs: Math.max(1, Math.round(entry.durationMicroseconds / 1000)),
+        status: 'success' as const,
+        details: {
+          slowlogId: entry.id,
+          command: entry.command,
+          args: entry.arguments,
+          durationMicroseconds: entry.durationMicroseconds,
+        },
+      }))
+      const nextCursor =
+        parsedEntries.length > 0
+          ? String(parsedEntries[parsedEntries.length - 1].id)
+          : args.cursor
+
+      return {
+        events,
+        nextCursor,
+      }
+    } catch (error) {
+      throw this.toConnectionFailure(error)
+    } finally {
+      await this.disconnectRedisClient(client)
     }
   }
 
@@ -427,4 +497,52 @@ const toRedisText = (value: unknown): string => {
   }
 
   return String(value)
+}
+
+type RedisSlowLogEntry = {
+  id: number
+  startedAtSeconds: number
+  durationMicroseconds: number
+  command: string
+  keyOrPattern: string
+  arguments: string[]
+}
+
+const parseRedisSlowLogEntry = (entry: unknown): RedisSlowLogEntry | null => {
+  if (!Array.isArray(entry) || entry.length < 4) {
+    return null
+  }
+
+  const id = Number(entry[0])
+  const startedAtSeconds = Number(entry[1])
+  const durationMicroseconds = Number(entry[2])
+  if (
+    !Number.isFinite(id) ||
+    !Number.isFinite(startedAtSeconds) ||
+    !Number.isFinite(durationMicroseconds)
+  ) {
+    return null
+  }
+
+  const rawCommand = entry[3]
+  const commandTokens = Array.isArray(rawCommand)
+    ? rawCommand.map((token) => toRedisText(token))
+    : [toRedisText(rawCommand)]
+
+  if (commandTokens.length === 0) {
+    return null
+  }
+
+  const command = commandTokens[0].trim().toUpperCase() || 'UNKNOWN'
+  const commandArguments = commandTokens.slice(1)
+  const keyOrPattern = commandArguments[0] ?? command
+
+  return {
+    id: Math.trunc(id),
+    startedAtSeconds: Math.trunc(startedAtSeconds),
+    durationMicroseconds: Math.max(0, Math.trunc(durationMicroseconds)),
+    command,
+    keyOrPattern,
+    arguments: commandArguments,
+  }
 }

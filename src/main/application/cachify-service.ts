@@ -37,10 +37,15 @@ import type {
   HistoryEvent,
   HistoryQueryRequest,
   IncidentBundle,
+  IncidentBundleExportJobCancelRequest,
+  IncidentBundleExportJobGetRequest,
+  IncidentBundleExportJobResumeRequest,
   IncidentBundleExportRequest,
+  IncidentBundleExportStartRequest,
   IncidentBundleListRequest,
   IncidentBundlePreview,
   IncidentBundlePreviewRequest,
+  IncidentExportJob,
   KeyDeleteRequest,
   KeyGetRequest,
   KeyspaceActivityPattern,
@@ -114,6 +119,14 @@ const SLOW_OPERATION_THRESHOLD_MS = 750
 const DASHBOARD_DEFAULT_LIMIT = 200
 const RETENTION_ALERT_COOLDOWN_MS = 5 * 60_000
 const RETENTION_BUDGET_WARN_RATIO = 0.9
+const INCIDENT_DATASET_SAMPLE_LIMIT = 5000
+
+class IncidentExportCancelledError extends Error {
+  public constructor() {
+    super('Incident bundle export was cancelled.')
+    this.name = 'IncidentExportCancelledError'
+  }
+}
 
 type RetryPolicy = {
   maxAttempts: number
@@ -123,6 +136,21 @@ type RetryPolicy = {
 }
 
 type OperationStatus = 'success' | 'error' | 'blocked'
+
+type IncidentBundleCollection = {
+  connectionIds: string[]
+  timeline: HistoryEvent[]
+  logs: AlertEvent[]
+  diagnostics: FailedOperationDiagnostic[]
+  metrics: ObservabilitySnapshot[]
+  truncated: boolean
+}
+
+type IncidentExportJobState = {
+  job: IncidentExportJob
+  cancelRequested: boolean
+  execution: Promise<void> | null
+}
 
 type ExecuteWithPolicyArgs<T> = {
   profile: ConnectionProfile
@@ -591,6 +619,8 @@ export class CachifyService {
   private readonly alertRuleCooldown = new Map<string, number>()
 
   private readonly retentionAlertCooldown = new Map<string, number>()
+
+  private readonly incidentExportJobs = new Map<string, IncidentExportJobState>()
 
   public constructor(
     private readonly connectionRepository: ConnectionRepository,
@@ -1335,23 +1365,32 @@ export class CachifyService {
     payload: ObservabilityDashboardRequest,
   ): Promise<ObservabilityDashboard> {
     const now = new Date().toISOString()
-    const limit = payload.limit ?? DASHBOARD_DEFAULT_LIMIT
+    const sampleLimit = clampInteger(
+      payload.limit,
+      1,
+      2000,
+      DASHBOARD_DEFAULT_LIMIT,
+    )
 
-    const [connections, timeline, snapshots] = await Promise.all([
+    const [connections, timelineSample, snapshotsSample] = await Promise.all([
       this.connectionRepository.list(),
       this.historyRepository.query({
         connectionId: payload.connectionId,
         from: payload.from,
         to: payload.to,
-        limit,
+        limit: sampleLimit + 1,
       }),
       this.observabilityRepository.query({
         connectionId: payload.connectionId,
         from: payload.from,
         to: payload.to,
-        limit,
+        limit: sampleLimit + 1,
       }),
     ])
+    const timeline = timelineSample.slice(0, sampleLimit)
+    const snapshots = snapshotsSample.slice(0, sampleLimit)
+    const truncated =
+      timelineSample.length > sampleLimit || snapshotsSample.length > sampleLimit
 
     const latestByConnection = new Map<string, ObservabilitySnapshot>()
     for (const snapshot of snapshots) {
@@ -1452,6 +1491,7 @@ export class CachifyService {
 
     return {
       generatedAt: now,
+      truncated,
       health,
       trends,
       heatmap,
@@ -1634,12 +1674,15 @@ export class CachifyService {
   public async getKeyspaceActivity(
     payload: KeyspaceActivityRequest,
   ): Promise<KeyspaceActivityView> {
-    const events = await this.historyRepository.query({
+    const sampleLimit = clampInteger(payload.limit, 1, 5000, 1000)
+    const eventsSample = await this.historyRepository.query({
       connectionId: payload.connectionId,
       from: payload.from,
       to: payload.to,
-      limit: clampInteger(payload.limit, 1, 5000, 1000),
+      limit: sampleLimit + 1,
     })
+    const events = eventsSample.slice(0, sampleLimit)
+    const truncated = eventsSample.length > sampleLimit
 
     const patternMap = new Map<
       string,
@@ -1710,6 +1753,8 @@ export class CachifyService {
       generatedAt: new Date().toISOString(),
       from: payload.from,
       to: payload.to,
+      totalEvents: events.length,
+      truncated,
       topPatterns,
       distribution,
     }
@@ -1718,17 +1763,23 @@ export class CachifyService {
   public async getFailedOperationDrilldown(
     payload: FailedOperationDrilldownRequest,
   ): Promise<FailedOperationDrilldownResult> {
-    const timeline = await this.historyRepository.query({
+    const timelineSampleLimit = clampInteger(payload.limit, 1, 5000, 1000)
+    const timelineSample = await this.historyRepository.query({
       connectionId: payload.connectionId,
       from: payload.from,
       to: payload.to,
-      limit: clampInteger(payload.limit, 1, 5000, 1000),
+      limit: timelineSampleLimit + 1,
     })
+    const timeline = timelineSample.slice(0, timelineSampleLimit)
+    const timelineTruncated = timelineSample.length > timelineSampleLimit
 
     const errorEvents = timeline.filter((event) => event.status === 'error')
+    const diagnosticLimit = clampInteger(payload.limit, 1, 500, 50)
     const selectedEvents = payload.eventId
       ? errorEvents.filter((event) => event.id === payload.eventId)
-      : errorEvents.slice(0, payload.limit)
+      : errorEvents.slice(0, diagnosticLimit)
+    const diagnosticsTruncated =
+      !payload.eventId && errorEvents.length > diagnosticLimit
 
     const diagnostics = await Promise.all(
       selectedEvents.map(async (event): Promise<FailedOperationDiagnostic> => {
@@ -1772,6 +1823,8 @@ export class CachifyService {
 
     return {
       generatedAt: new Date().toISOString(),
+      totalErrorEvents: errorEvents.length,
+      truncated: timelineTruncated || diagnosticsTruncated,
       diagnostics,
     }
   }
@@ -1821,6 +1874,9 @@ export class CachifyService {
       generatedAt: new Date().toISOString(),
       baselineLabel: `${payload.baselineFrom} -> ${payload.baselineTo}`,
       compareLabel: `${payload.compareFrom} -> ${payload.compareTo}`,
+      baselineSampledEvents: baseline.sampledEvents,
+      compareSampledEvents: compare.sampledEvents,
+      truncated: baseline.truncated || compare.truncated,
       metrics,
     }
   }
@@ -1829,45 +1885,7 @@ export class CachifyService {
     payload: IncidentBundlePreviewRequest,
   ): Promise<IncidentBundlePreview> {
     const data = await this.collectIncidentBundleData(payload)
-    const timelineCount = data.timeline.length
-    const logCount = data.logs.length
-    const diagnosticCount = data.diagnostics.length
-    const metricCount = data.metrics.length
-    const estimatedSizeBytes =
-      timelineCount * 520 +
-      logCount * 340 +
-      diagnosticCount * 780 +
-      metricCount * 220
-
-    const checksumPreview = createHash('sha256')
-      .update(
-        JSON.stringify({
-          from: payload.from,
-          to: payload.to,
-          connectionIds: data.connectionIds,
-          includes: payload.includes,
-          redactionProfile: payload.redactionProfile,
-          timelineCount,
-          logCount,
-          diagnosticCount,
-          metricCount,
-        }),
-      )
-      .digest('hex')
-
-    return {
-      from: payload.from,
-      to: payload.to,
-      connectionIds: data.connectionIds,
-      includes: payload.includes,
-      redactionProfile: payload.redactionProfile,
-      timelineCount,
-      logCount,
-      diagnosticCount,
-      metricCount,
-      estimatedSizeBytes,
-      checksumPreview,
-    }
+    return this.buildIncidentBundlePreview(payload, data)
   }
 
   public async listIncidentBundles(
@@ -1879,112 +1897,100 @@ export class CachifyService {
   public async exportIncidentBundle(
     payload: IncidentBundleExportRequest,
   ): Promise<IncidentBundle> {
-    const preview = await this.previewIncidentBundle(payload)
-    const data = await this.collectIncidentBundleData(payload)
-    const id = uuidv4()
-    const createdAt = new Date().toISOString()
-    const checksum = createHash('sha256')
-      .update(
-        JSON.stringify({
-          id,
-          createdAt,
-          preview,
-          timeline: data.timeline.map((event) => event.id),
-          logs: data.logs.map((event) => event.id),
-          diagnostics: data.diagnostics.map((item) => item.event.id),
-          metrics: data.metrics.map((snapshot) => snapshot.id),
-        }),
-      )
-      .digest('hex')
+    const { bundle } = await this.runIncidentBundleExport(payload)
+    return bundle
+  }
 
-    const artifactPath =
+  public async startIncidentBundleExport(
+    payload: IncidentBundleExportStartRequest,
+  ): Promise<IncidentExportJob> {
+    const id = uuidv4()
+    const now = new Date().toISOString()
+    const destinationPath =
       payload.destinationPath?.trim() ||
       path.join(os.tmpdir(), `cachify-incident-${id}.json`)
 
-    const artifactPayload = {
-      metadata: {
+    const jobState: IncidentExportJobState = {
+      job: {
         id,
-        createdAt,
-        from: payload.from,
-        to: payload.to,
-        connectionIds: data.connectionIds,
-        includes: payload.includes,
-        redactionProfile: payload.redactionProfile,
-        checksum,
-      },
-      timeline:
-        payload.redactionProfile === 'strict'
-          ? data.timeline.map((event): HistoryEvent => ({
-              ...event,
-              details: undefined,
-              redactedDiff: undefined,
-            }))
-          : data.timeline,
-      logs:
-        payload.redactionProfile === 'strict'
-          ? data.logs.map((event) => ({
-              ...event,
-              message: redactMessage(event.message),
-            }))
-          : data.logs,
-      diagnostics:
-        payload.redactionProfile === 'strict'
-          ? data.diagnostics.map((entry): FailedOperationDiagnostic => ({
-              ...entry,
-              event: {
-                ...entry.event,
-                details: undefined,
-                redactedDiff: undefined,
-              },
-              relatedEvents: entry.relatedEvents.map((related): HistoryEvent => ({
-                ...related,
-                details: undefined,
-                redactedDiff: undefined,
-              })),
-            }))
-          : data.diagnostics,
-      metrics: data.metrics,
-    }
-
-    try {
-      fs.mkdirSync(path.dirname(artifactPath), { recursive: true })
-      fs.writeFileSync(
-        artifactPath,
-        JSON.stringify(artifactPayload, null, 2),
-        'utf8',
-      )
-    } catch (error) {
-      throw new OperationFailure(
-        'INTERNAL_ERROR',
-        'Incident bundle could not be written to disk.',
-        false,
-        {
-          artifactPath,
-          cause: error instanceof Error ? error.message : 'unknown',
+        status: 'pending',
+        stage: 'queued',
+        progressPercent: 0,
+        createdAt: now,
+        updatedAt: now,
+        request: {
+          ...payload,
+          destinationPath,
         },
-      )
+        destinationPath,
+      },
+      cancelRequested: false,
+      execution: null,
     }
 
-    const bundle: IncidentBundle = {
-      id,
-      createdAt,
-      from: payload.from,
-      to: payload.to,
-      connectionIds: data.connectionIds,
-      includes: payload.includes,
-      redactionProfile: payload.redactionProfile,
-      checksum,
-      artifactPath,
-      timelineCount: preview.timelineCount,
-      logCount: preview.logCount,
-      diagnosticCount: preview.diagnosticCount,
-      metricCount: preview.metricCount,
+    this.incidentExportJobs.set(id, jobState)
+    this.scheduleIncidentExportJob(jobState)
+
+    return this.cloneIncidentExportJob(jobState.job)
+  }
+
+  public async cancelIncidentBundleExport(
+    payload: IncidentBundleExportJobCancelRequest,
+  ): Promise<IncidentExportJob> {
+    const jobState = this.requireIncidentExportJob(payload.jobId)
+
+    if (jobState.job.status === 'success' || jobState.job.status === 'failed') {
+      return this.cloneIncidentExportJob(jobState.job)
     }
 
-    await this.incidentBundleRepository.save(bundle)
-    await this.enforceRetentionForDatasets(['incidentArtifacts'])
+    jobState.cancelRequested = true
+    if (jobState.job.status === 'pending') {
+      this.updateIncidentExportJob(jobState, {
+        status: 'cancelled',
+        stage: 'cancelled',
+      })
+    } else if (jobState.job.status !== 'cancelled') {
+      this.updateIncidentExportJob(jobState, {
+        status: 'cancelling',
+      })
+    }
 
-    return bundle
+    return this.cloneIncidentExportJob(jobState.job)
+  }
+
+  public async resumeIncidentBundleExport(
+    payload: IncidentBundleExportJobResumeRequest,
+  ): Promise<IncidentExportJob> {
+    const jobState = this.requireIncidentExportJob(payload.jobId)
+
+    if (
+      jobState.job.status !== 'cancelled' &&
+      jobState.job.status !== 'failed'
+    ) {
+      return this.cloneIncidentExportJob(jobState.job)
+    }
+
+    jobState.cancelRequested = false
+    this.updateIncidentExportJob(jobState, {
+      status: 'pending',
+      stage: 'queued',
+      progressPercent: 0,
+      errorMessage: undefined,
+      bundle: undefined,
+      checksumPreview: undefined,
+      truncated: undefined,
+      manifest: undefined,
+    })
+    this.scheduleIncidentExportJob(jobState)
+
+    return this.cloneIncidentExportJob(jobState.job)
+  }
+
+  public async getIncidentBundleExportJob(
+    payload: IncidentBundleExportJobGetRequest,
+  ): Promise<IncidentExportJob> {
+    const jobState = this.requireIncidentExportJob(payload.jobId)
+    return this.cloneIncidentExportJob(jobState.job)
   }
 
   public async listAlertRules(): Promise<AlertRule[]> {
@@ -2487,6 +2493,349 @@ export class CachifyService {
     }
   }
 
+  private buildIncidentBundlePreview(
+    payload: IncidentBundlePreviewRequest,
+    data: IncidentBundleCollection,
+  ): IncidentBundlePreview {
+    const timelineCount = data.timeline.length
+    const logCount = data.logs.length
+    const diagnosticCount = data.diagnostics.length
+    const metricCount = data.metrics.length
+    const manifest: IncidentBundlePreview['manifest'] = {
+      timelineEventIds: data.timeline.map((event) => event.id),
+      logEventIds: data.logs.map((event) => event.id),
+      diagnosticEventIds: data.diagnostics.map((entry) => entry.event.id),
+      metricSnapshotIds: data.metrics.map((snapshot) => snapshot.id),
+    }
+    const estimatedSizeBytes =
+      timelineCount * 520 +
+      logCount * 340 +
+      diagnosticCount * 780 +
+      metricCount * 220
+
+    const checksumPreview = createHash('sha256')
+      .update(
+        JSON.stringify({
+          from: payload.from,
+          to: payload.to,
+          connectionIds: data.connectionIds,
+          includes: payload.includes,
+          redactionProfile: payload.redactionProfile,
+          timelineCount,
+          logCount,
+          diagnosticCount,
+          metricCount,
+          truncated: data.truncated,
+          manifest,
+        }),
+      )
+      .digest('hex')
+
+    return {
+      from: payload.from,
+      to: payload.to,
+      connectionIds: data.connectionIds,
+      includes: payload.includes,
+      redactionProfile: payload.redactionProfile,
+      timelineCount,
+      logCount,
+      diagnosticCount,
+      metricCount,
+      estimatedSizeBytes,
+      checksumPreview,
+      truncated: data.truncated,
+      manifest,
+    }
+  }
+
+  private async runIncidentBundleExport(
+    payload: IncidentBundleExportRequest,
+    options?: {
+      shouldCancel?: () => boolean
+      onStage?: (stage: IncidentExportJob['stage'], progressPercent: number) => void
+    },
+  ): Promise<{
+    preview: IncidentBundlePreview
+    bundle: IncidentBundle
+  }> {
+    options?.onStage?.('collecting', 10)
+    this.ensureIncidentExportNotCancelled(options?.shouldCancel)
+
+    const data = await this.collectIncidentBundleData(payload)
+    const preview = this.buildIncidentBundlePreview(payload, data)
+
+    options?.onStage?.('serializing', 45)
+    this.ensureIncidentExportNotCancelled(options?.shouldCancel)
+
+    const id = uuidv4()
+    const createdAt = new Date().toISOString()
+    const checksum = createHash('sha256')
+      .update(
+        JSON.stringify({
+          id,
+          createdAt,
+          preview,
+          timeline: data.timeline.map((event) => event.id),
+          logs: data.logs.map((event) => event.id),
+          diagnostics: data.diagnostics.map((item) => item.event.id),
+          metrics: data.metrics.map((snapshot) => snapshot.id),
+        }),
+      )
+      .digest('hex')
+
+    const artifactPath =
+      payload.destinationPath?.trim() ||
+      path.join(os.tmpdir(), `cachify-incident-${id}.json`)
+
+    const artifactPayload = this.buildIncidentBundleArtifactPayload({
+      payload,
+      id,
+      createdAt,
+      checksum,
+      preview,
+      data,
+    })
+
+    options?.onStage?.('writing', 70)
+    this.ensureIncidentExportNotCancelled(options?.shouldCancel)
+    try {
+      fs.mkdirSync(path.dirname(artifactPath), { recursive: true })
+      fs.writeFileSync(
+        artifactPath,
+        JSON.stringify(artifactPayload, null, 2),
+        'utf8',
+      )
+    } catch (error) {
+      throw new OperationFailure(
+        'INTERNAL_ERROR',
+        'Incident bundle could not be written to disk.',
+        false,
+        {
+          artifactPath,
+          cause: error instanceof Error ? error.message : 'unknown',
+        },
+      )
+    }
+
+    const bundle: IncidentBundle = {
+      id,
+      createdAt,
+      from: payload.from,
+      to: payload.to,
+      connectionIds: data.connectionIds,
+      includes: payload.includes,
+      redactionProfile: payload.redactionProfile,
+      checksum,
+      artifactPath,
+      timelineCount: preview.timelineCount,
+      logCount: preview.logCount,
+      diagnosticCount: preview.diagnosticCount,
+      metricCount: preview.metricCount,
+      truncated: preview.truncated,
+    }
+
+    options?.onStage?.('persisting', 90)
+    this.ensureIncidentExportNotCancelled(options?.shouldCancel)
+    await this.incidentBundleRepository.save(bundle)
+    await this.enforceRetentionForDatasets(['incidentArtifacts'])
+
+    options?.onStage?.('completed', 100)
+
+    return {
+      preview,
+      bundle,
+    }
+  }
+
+  private buildIncidentBundleArtifactPayload(args: {
+    payload: IncidentBundleExportRequest
+    id: string
+    createdAt: string
+    checksum: string
+    preview: IncidentBundlePreview
+    data: IncidentBundleCollection
+  }): Record<string, unknown> {
+    const { payload, id, createdAt, checksum, preview, data } = args
+    return {
+      metadata: {
+        id,
+        createdAt,
+        from: payload.from,
+        to: payload.to,
+        connectionIds: data.connectionIds,
+        includes: payload.includes,
+        redactionProfile: payload.redactionProfile,
+        checksum,
+        checksumPreview: preview.checksumPreview,
+        truncated: preview.truncated,
+        manifest: preview.manifest,
+      },
+      timeline:
+        payload.redactionProfile === 'strict'
+          ? data.timeline.map((event): HistoryEvent => ({
+              ...event,
+              details: undefined,
+              redactedDiff: undefined,
+            }))
+          : data.timeline,
+      logs:
+        payload.redactionProfile === 'strict'
+          ? data.logs.map((event) => ({
+              ...event,
+              message: redactMessage(event.message),
+            }))
+          : data.logs,
+      diagnostics:
+        payload.redactionProfile === 'strict'
+          ? data.diagnostics.map((entry): FailedOperationDiagnostic => ({
+              ...entry,
+              event: {
+                ...entry.event,
+                details: undefined,
+                redactedDiff: undefined,
+              },
+              relatedEvents: entry.relatedEvents.map((related): HistoryEvent => ({
+                ...related,
+                details: undefined,
+                redactedDiff: undefined,
+              })),
+            }))
+          : data.diagnostics,
+      metrics: data.metrics,
+    }
+  }
+
+  private scheduleIncidentExportJob(jobState: IncidentExportJobState): void {
+    if (jobState.execution) {
+      return
+    }
+
+    jobState.execution = this.executeIncidentExportJob(jobState).finally(() => {
+      jobState.execution = null
+    })
+  }
+
+  private async executeIncidentExportJob(
+    jobState: IncidentExportJobState,
+  ): Promise<void> {
+    if (jobState.cancelRequested || jobState.job.status === 'cancelled') {
+      this.updateIncidentExportJob(jobState, {
+        status: 'cancelled',
+        stage: 'cancelled',
+      })
+      return
+    }
+
+    this.updateIncidentExportJob(jobState, {
+      status: 'running',
+      stage: 'collecting',
+      progressPercent: 5,
+      errorMessage: undefined,
+    })
+
+    try {
+      const { preview, bundle } = await this.runIncidentBundleExport(
+        jobState.job.request,
+        {
+          shouldCancel: () => jobState.cancelRequested,
+          onStage: (stage, progressPercent) => {
+            this.updateIncidentExportJob(jobState, {
+              status:
+                jobState.job.status === 'cancelling' ? 'cancelling' : 'running',
+              stage,
+              progressPercent,
+            })
+          },
+        },
+      )
+
+      this.updateIncidentExportJob(jobState, {
+        status: 'success',
+        stage: 'completed',
+        progressPercent: 100,
+        checksumPreview: preview.checksumPreview,
+        manifest: preview.manifest,
+        truncated: preview.truncated,
+        bundle,
+      })
+    } catch (error) {
+      if (error instanceof IncidentExportCancelledError) {
+        this.updateIncidentExportJob(jobState, {
+          status: 'cancelled',
+          stage: 'cancelled',
+        })
+        return
+      }
+
+      this.updateIncidentExportJob(jobState, {
+        status: 'failed',
+        stage: 'failed',
+        errorMessage: error instanceof Error ? error.message : 'Unknown error.',
+      })
+    } finally {
+      jobState.cancelRequested = false
+    }
+  }
+
+  private requireIncidentExportJob(jobId: string): IncidentExportJobState {
+    const jobState = this.incidentExportJobs.get(jobId)
+    if (!jobState) {
+      throw new OperationFailure(
+        'VALIDATION_ERROR',
+        'Incident export job was not found.',
+        false,
+        { jobId },
+      )
+    }
+
+    return jobState
+  }
+
+  private updateIncidentExportJob(
+    jobState: IncidentExportJobState,
+    patch: Partial<IncidentExportJob>,
+  ): void {
+    jobState.job = {
+      ...jobState.job,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    }
+  }
+
+  private cloneIncidentExportJob(job: IncidentExportJob): IncidentExportJob {
+    return {
+      ...job,
+      request: {
+        ...job.request,
+        connectionIds: job.request.connectionIds
+          ? [...job.request.connectionIds]
+          : undefined,
+        includes: [...job.request.includes],
+      },
+      manifest: job.manifest
+        ? {
+            timelineEventIds: [...job.manifest.timelineEventIds],
+            logEventIds: [...job.manifest.logEventIds],
+            diagnosticEventIds: [...job.manifest.diagnosticEventIds],
+            metricSnapshotIds: [...job.manifest.metricSnapshotIds],
+          }
+        : undefined,
+      bundle: job.bundle
+        ? {
+            ...job.bundle,
+            connectionIds: [...job.bundle.connectionIds],
+            includes: [...job.bundle.includes],
+          }
+        : undefined,
+    }
+  }
+
+  private ensureIncidentExportNotCancelled(shouldCancel?: () => boolean): void {
+    if (shouldCancel?.()) {
+      throw new IncidentExportCancelledError()
+    }
+  }
+
   private async aggregatePeriodMetrics(args: {
     connectionId?: string
     from: string
@@ -2496,13 +2845,17 @@ export class CachifyService {
     errorRate: number
     latencyP95Ms: number
     slowOpCount: number
+    sampledEvents: number
+    truncated: boolean
   }> {
-    const events = await this.historyRepository.query({
+    const eventsSample = await this.historyRepository.query({
       connectionId: args.connectionId,
       from: args.from,
       to: args.to,
-      limit: 5000,
+      limit: INCIDENT_DATASET_SAMPLE_LIMIT + 1,
     })
+    const events = eventsSample.slice(0, INCIDENT_DATASET_SAMPLE_LIMIT)
+    const truncated = eventsSample.length > INCIDENT_DATASET_SAMPLE_LIMIT
     const operationCount = events.length
     const errorCount = events.filter((event) => event.status === 'error').length
     const slowOpCount = events.filter(
@@ -2520,6 +2873,8 @@ export class CachifyService {
           : Number((errorCount / operationCount).toFixed(3)),
       latencyP95Ms: percentile(sortedDurations, 0.95),
       slowOpCount,
+      sampledEvents: operationCount,
+      truncated,
     }
   }
 
@@ -2528,19 +2883,14 @@ export class CachifyService {
     to: string
     connectionIds?: string[]
     includes: IncidentBundle['includes']
-  }): Promise<{
-    connectionIds: string[]
-    timeline: HistoryEvent[]
-    logs: AlertEvent[]
-    diagnostics: FailedOperationDiagnostic[]
-    metrics: ObservabilitySnapshot[]
-  }> {
+  }): Promise<IncidentBundleCollection> {
     const include = new Set(args.includes)
     const connectionFilter =
       args.connectionIds && args.connectionIds.length > 0
         ? new Set(args.connectionIds)
         : null
-    const limit = 5000
+    const sampleLimit = INCIDENT_DATASET_SAMPLE_LIMIT
+    const queryLimit = sampleLimit + 1
 
     const shouldFilterConnection = (
       connectionId?: string,
@@ -2556,35 +2906,45 @@ export class CachifyService {
       return connectionFilter.has(connectionId)
     }
 
-    const baseTimeline = await this.historyRepository.query({
+    const directConnectionFilter =
+      args.connectionIds && args.connectionIds.length === 1
+        ? args.connectionIds[0]
+        : undefined
+
+    const baseTimelineSample = await this.historyRepository.query({
+      connectionId: directConnectionFilter,
       from: args.from,
       to: args.to,
-      limit,
+      limit: queryLimit,
     })
-    const scopedTimeline = baseTimeline.filter((event) =>
+    const scopedTimelineSample = baseTimelineSample.filter((event) =>
       shouldFilterConnection(event.connectionId),
     )
+    const scopedTimeline = scopedTimelineSample.slice(0, sampleLimit)
 
-    const alerts = await this.alertRepository.list({
+    const alertSample = await this.alertRepository.list({
       unreadOnly: false,
-      limit,
+      limit: queryLimit,
     })
-    const scopedLogs = alerts.filter((event) => {
+    const scopedLogSample = alertSample.filter((event) => {
       if (event.createdAt < args.from || event.createdAt > args.to) {
         return false
       }
 
       return shouldFilterConnection(event.connectionId)
     })
+    const scopedLogs = scopedLogSample.slice(0, sampleLimit)
 
-    const snapshots = await this.observabilityRepository.query({
+    const snapshotSample = await this.observabilityRepository.query({
+      connectionId: directConnectionFilter,
       from: args.from,
       to: args.to,
-      limit,
+      limit: queryLimit,
     })
-    const scopedSnapshots = snapshots.filter((snapshot) =>
+    const scopedSnapshotSample = snapshotSample.filter((snapshot) =>
       shouldFilterConnection(snapshot.connectionId),
     )
+    const scopedSnapshots = scopedSnapshotSample.slice(0, sampleLimit)
 
     const snapshotsByConnection = new Map<string, ObservabilitySnapshot[]>()
     for (const snapshot of scopedSnapshots) {
@@ -2642,6 +3002,13 @@ export class CachifyService {
             ...scopedSnapshots.map((snapshot) => snapshot.connectionId),
           ]),
         )
+    const truncated =
+      baseTimelineSample.length > sampleLimit ||
+      scopedTimelineSample.length > sampleLimit ||
+      alertSample.length > sampleLimit ||
+      scopedLogSample.length > sampleLimit ||
+      snapshotSample.length > sampleLimit ||
+      scopedSnapshotSample.length > sampleLimit
 
     return {
       connectionIds: resolvedConnectionIds,
@@ -2649,6 +3016,7 @@ export class CachifyService {
       logs: include.has('logs') ? scopedLogs : [],
       diagnostics: include.has('diagnostics') ? diagnostics : [],
       metrics: include.has('metrics') ? scopedSnapshots : [],
+      truncated,
     }
   }
 

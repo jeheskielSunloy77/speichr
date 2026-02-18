@@ -59,7 +59,7 @@ This implementation targets `PRD-V3.md` advanced observability and governance re
   - workflow history
   - incident artifacts
 - Storage summary with over-budget visibility.
-- Manual purge controls with dry-run support and result feedback.
+- Manual purge controls with two-step impact preview and typed confirmation before destructive execution.
 - Runtime retention enforcement:
   - budget warning alerts
   - auto-purge for over-budget datasets with `autoPurgeOldest` enabled
@@ -90,5 +90,5 @@ bun run test:all
 
 ## Known Tradeoffs
 
-- Incident export currently executes in-process and reports completion state, without resumable chunk progress UI.
+- Incident export runs as an in-process async job with stage/progress updates, but job state is not persisted across app restarts.
 - Compare-period data is returned as full computed deltas rather than renderer-side streaming visualizations.

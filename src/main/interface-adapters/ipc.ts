@@ -111,6 +111,12 @@ const handleCommand = async (
       return service.updateRetentionPolicy(envelope.payload)
     case 'retention.purge':
       return service.purgeRetentionData(envelope.payload)
+    case 'incident.bundle.export.start':
+      return service.startIncidentBundleExport(envelope.payload)
+    case 'incident.bundle.export.cancel':
+      return service.cancelIncidentBundleExport(envelope.payload)
+    case 'incident.bundle.export.resume':
+      return service.resumeIncidentBundleExport(envelope.payload)
     case 'incident.bundle.export':
       return service.exportIncidentBundle(envelope.payload)
     default:
@@ -167,6 +173,8 @@ const handleQuery = async (
       return service.listRetentionPolicies()
     case 'storage.summary':
       return service.getStorageSummary()
+    case 'incident.bundle.export.job.get':
+      return service.getIncidentBundleExportJob(envelope.payload)
     case 'incident.bundle.preview':
       return service.previewIncidentBundle(envelope.payload)
     case 'incident.bundle.list':

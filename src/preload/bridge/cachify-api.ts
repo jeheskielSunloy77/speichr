@@ -96,6 +96,14 @@ export const cachifyApi: CachifyApi = {
     invokeQuery('incident.bundle.list', payload),
   exportIncidentBundle: (payload) =>
     invokeCommand('incident.bundle.export', payload),
+  startIncidentBundleExport: (payload) =>
+    invokeCommand('incident.bundle.export.start', payload),
+  cancelIncidentBundleExportJob: (payload) =>
+    invokeCommand('incident.bundle.export.cancel', payload),
+  resumeIncidentBundleExportJob: (payload) =>
+    invokeCommand('incident.bundle.export.resume', payload),
+  getIncidentBundleExportJob: (payload) =>
+    invokeQuery('incident.bundle.export.job.get', payload),
   listAlerts: (payload) => invokeQuery('alert.list', payload),
   markAlertRead: (payload) => invokeCommand('alert.markRead', payload),
   listAlertRules: () => invokeQuery('alert.rule.list', {}),

@@ -392,6 +392,14 @@ const incidentBundleExportPayloadSchema = incidentBundleBasePayloadSchema
   })
   .strict()
 
+const incidentBundleExportStartPayloadSchema = incidentBundleExportPayloadSchema
+
+const incidentBundleExportJobPayloadSchema = z
+  .object({
+    jobId: idSchema,
+  })
+  .strict()
+
 const workflowExecutionListPayloadSchema = z
   .object({
     connectionId: idSchema.optional(),
@@ -644,6 +652,27 @@ export const commandEnvelopeSchema = z.discriminatedUnion('command', [
     .strict(),
   z
     .object({
+      command: z.literal('incident.bundle.export.start'),
+      payload: incidentBundleExportStartPayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal('incident.bundle.export.cancel'),
+      payload: incidentBundleExportJobPayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal('incident.bundle.export.resume'),
+      payload: incidentBundleExportJobPayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
       command: z.literal('incident.bundle.export'),
       payload: incidentBundleExportPayloadSchema,
       correlationId: correlationIdSchema,
@@ -803,6 +832,13 @@ export const queryEnvelopeSchema = z.discriminatedUnion('query', [
     .object({
       query: z.literal('storage.summary'),
       payload: z.object({}).strict(),
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      query: z.literal('incident.bundle.export.job.get'),
+      payload: incidentBundleExportJobPayloadSchema,
       correlationId: correlationIdSchema,
     })
     .strict(),

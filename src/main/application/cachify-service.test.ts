@@ -131,6 +131,10 @@ const createGatewayMock = (overrides?: Partial<CacheGateway>): CacheGateway => {
     })),
     setValue: vi.fn(async () => undefined),
     deleteKey: vi.fn(async () => undefined),
+    pollEngineEvents: vi.fn(async (_profile, _secret, args) => ({
+      events: [],
+      nextCursor: args.cursor,
+    })),
   }
 
   return {
@@ -974,6 +978,8 @@ describe('CachifyService', () => {
     expect(preview.timelineCount).toBeGreaterThan(0)
     expect(preview.diagnosticCount).toBeGreaterThan(0)
     expect(preview.checksumPreview).toBeTruthy()
+    expect(preview.truncated).toBe(false)
+    expect(preview.manifest.timelineEventIds.length).toBe(preview.timelineCount)
 
     const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'cachify-incident-'))
     const destinationPath = path.join(tempDirectory, 'bundle.json')
@@ -989,6 +995,7 @@ describe('CachifyService', () => {
 
     expect(exported.artifactPath).toBe(destinationPath)
     expect(fs.existsSync(destinationPath)).toBe(true)
+    expect(exported.truncated).toBe(false)
 
     const bundles = await service.listIncidentBundles({
       limit: 10,
@@ -1001,6 +1008,43 @@ describe('CachifyService', () => {
       metadata: { redactionProfile: string }
     }
     expect(artifact.metadata.redactionProfile).toBe('strict')
+
+    const asyncDestinationPath = path.join(tempDirectory, 'bundle-async.json')
+    const startedJob = await service.startIncidentBundleExport({
+      from,
+      to,
+      includes: ['timeline', 'logs', 'diagnostics', 'metrics'],
+      redactionProfile: 'default',
+      connectionIds: [profile.id],
+      destinationPath: asyncDestinationPath,
+    })
+
+    expect(['pending', 'running']).toContain(startedJob.status)
+
+    let asyncJob = await service.getIncidentBundleExportJob({
+      jobId: startedJob.id,
+    })
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      if (
+        asyncJob.status === 'success' ||
+        asyncJob.status === 'failed' ||
+        asyncJob.status === 'cancelled'
+      ) {
+        break
+      }
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, 5)
+      })
+      asyncJob = await service.getIncidentBundleExportJob({
+        jobId: startedJob.id,
+      })
+    }
+
+    expect(asyncJob.status).toBe('success')
+    expect(asyncJob.progressPercent).toBe(100)
+    expect(asyncJob.bundle?.artifactPath).toBe(asyncDestinationPath)
+    expect(fs.existsSync(asyncDestinationPath)).toBe(true)
 
     fs.rmSync(tempDirectory, { recursive: true, force: true })
   })

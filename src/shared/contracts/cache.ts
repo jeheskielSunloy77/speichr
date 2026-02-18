@@ -34,6 +34,13 @@ export type IncidentBundleInclude =
   | 'diagnostics'
   | 'metrics'
 export type RedactionProfile = 'default' | 'strict'
+export type IncidentExportJobStatus =
+  | 'pending'
+  | 'running'
+  | 'cancelling'
+  | 'cancelled'
+  | 'failed'
+  | 'success'
 export type CompareMetricDirection = 'improved' | 'regressed' | 'unchanged'
 
 export type OperationErrorCode =
@@ -390,6 +397,7 @@ export interface ErrorHeatmapCell {
 
 export interface ObservabilityDashboard {
   generatedAt: string
+  truncated: boolean
   health: ConnectionHealthSummary[]
   trends: OperationTrendPoint[]
   heatmap: ErrorHeatmapCell[]
@@ -430,6 +438,8 @@ export interface KeyspaceActivityView {
   generatedAt: string
   from: string
   to: string
+  totalEvents: number
+  truncated: boolean
   topPatterns: KeyspaceActivityPattern[]
   distribution: KeyspaceActivityPoint[]
 }
@@ -451,6 +461,8 @@ export interface FailedOperationDiagnostic {
 
 export interface FailedOperationDrilldownResult {
   generatedAt: string
+  totalErrorEvents: number
+  truncated: boolean
   diagnostics: FailedOperationDiagnostic[]
 }
 
@@ -475,6 +487,9 @@ export interface ComparePeriodsResult {
   generatedAt: string
   baselineLabel: string
   compareLabel: string
+  baselineSampledEvents: number
+  compareSampledEvents: number
+  truncated: boolean
   metrics: CompareMetricDelta[]
 }
 
@@ -492,6 +507,7 @@ export interface IncidentBundle {
   logCount: number
   diagnosticCount: number
   metricCount: number
+  truncated: boolean
 }
 
 export interface IncidentBundlePreviewRequest {
@@ -514,6 +530,13 @@ export interface IncidentBundlePreview {
   metricCount: number
   estimatedSizeBytes: number
   checksumPreview: string
+  truncated: boolean
+  manifest: {
+    timelineEventIds: string[]
+    logEventIds: string[]
+    diagnosticEventIds: string[]
+    metricSnapshotIds: string[]
+  }
 }
 
 export interface IncidentBundleExportRequest {
@@ -523,6 +546,44 @@ export interface IncidentBundleExportRequest {
   includes: IncidentBundleInclude[]
   redactionProfile: RedactionProfile
   destinationPath?: string
+}
+
+export type IncidentBundleExportStartRequest = IncidentBundleExportRequest
+
+export interface IncidentBundleExportJobGetRequest {
+  jobId: string
+}
+
+export interface IncidentBundleExportJobCancelRequest {
+  jobId: string
+}
+
+export interface IncidentBundleExportJobResumeRequest {
+  jobId: string
+}
+
+export interface IncidentExportJob {
+  id: string
+  status: IncidentExportJobStatus
+  stage:
+    | 'queued'
+    | 'collecting'
+    | 'serializing'
+    | 'writing'
+    | 'persisting'
+    | 'completed'
+    | 'cancelled'
+    | 'failed'
+  progressPercent: number
+  createdAt: string
+  updatedAt: string
+  request: IncidentBundleExportRequest
+  destinationPath: string
+  checksumPreview?: string
+  truncated?: boolean
+  manifest?: IncidentBundlePreview['manifest']
+  bundle?: IncidentBundle
+  errorMessage?: string
 }
 
 export interface IncidentBundleListRequest {

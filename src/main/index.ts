@@ -73,6 +73,7 @@ const initializeRuntime = (): RuntimeContext => {
   const cacheGateway = new DefaultCacheGateway(memcachedKeyIndexRepository)
   const engineEventIngestor = new ProviderEngineEventIngestor(
     connectionRepository,
+    secretStore,
     cacheGateway,
   )
   const notificationPublisher = new DesktopNotificationPublisher()

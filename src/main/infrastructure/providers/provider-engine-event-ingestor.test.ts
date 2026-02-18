@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ConnectionProfile } from '../../../shared/contracts/cache'
-import type { CacheGateway, ConnectionRepository } from '../../application/ports'
+import type {
+  CacheGateway,
+  ConnectionRepository,
+  SecretStore,
+} from '../../application/ports'
 import { ProviderEngineEventIngestor } from './provider-engine-event-ingestor'
 
 const createProfile = (
@@ -25,7 +29,7 @@ const createProfile = (
 })
 
 describe('ProviderEngineEventIngestor', () => {
-  it('checks provider capabilities for known profiles on start', async () => {
+  it('polls engine events for supported profiles on start', async () => {
     const connectionRepository: ConnectionRepository = {
       list: vi.fn(async () => [
         createProfile('redis-1', 'redis'),
@@ -36,14 +40,41 @@ describe('ProviderEngineEventIngestor', () => {
       delete: vi.fn(async () => undefined),
     }
 
+    const secretStore: SecretStore = {
+      saveSecret: vi.fn(async () => undefined),
+      getSecret: vi.fn(async () => ({
+        password: 'secret',
+      })),
+      deleteSecret: vi.fn(async () => undefined),
+    }
+
+    const pollEngineEvents = vi
+      .fn()
+      .mockResolvedValueOnce({
+        events: [
+          {
+            connectionId: 'redis-1',
+            action: 'redis.slowlog.get',
+            keyOrPattern: 'user:1',
+            durationMs: 10,
+            status: 'success',
+          },
+        ],
+        nextCursor: '5',
+      })
+      .mockResolvedValue({
+        events: [],
+        nextCursor: '5',
+      })
+
     const cacheGateway: CacheGateway = {
       testConnection: vi.fn(async () => {
         throw new Error('not needed')
       }),
-      getCapabilities: vi.fn(() => ({
+      getCapabilities: vi.fn((profile) => ({
         supportsTTL: true,
         supportsMonitorStream: false,
-        supportsSlowLog: false,
+        supportsSlowLog: profile.engine === 'redis',
         supportsBulkDeletePreview: false,
         supportsSnapshotRestore: false,
         supportsPatternScan: true,
@@ -58,18 +89,32 @@ describe('ProviderEngineEventIngestor', () => {
       })),
       setValue: vi.fn(async () => undefined),
       deleteKey: vi.fn(async () => undefined),
+      pollEngineEvents,
     }
 
+    const onEvent = vi.fn(async () => undefined)
     const ingestor = new ProviderEngineEventIngestor(
       connectionRepository,
+      secretStore,
       cacheGateway,
+      {
+        pollIntervalMs: 1,
+        pollLimit: 10,
+      },
     )
 
-    await ingestor.start({
-      onEvent: async () => undefined,
+    await ingestor.start({ onEvent })
+
+    await vi.waitFor(() => {
+      expect(connectionRepository.list).toHaveBeenCalledTimes(1)
+      expect(cacheGateway.getCapabilities).toHaveBeenCalledTimes(2)
+      expect(pollEngineEvents).toHaveBeenCalled()
+      expect(onEvent).toHaveBeenCalledTimes(1)
     })
 
-    expect(connectionRepository.list).toHaveBeenCalledTimes(1)
-    expect(cacheGateway.getCapabilities).toHaveBeenCalledTimes(2)
+    await ingestor.stop()
+
+    expect(secretStore.getSecret).toHaveBeenCalledWith('redis-1')
+    expect(secretStore.getSecret).not.toHaveBeenCalledWith('mem-1')
   })
 })

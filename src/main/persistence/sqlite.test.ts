@@ -393,6 +393,7 @@ describeSqlite('sqlite persistence v2', () => {
       logCount: 4,
       diagnosticCount: 2,
       metricCount: 8,
+      truncated: false,
     }
     await incidentBundleRepository.save(incidentBundle)
 
@@ -421,6 +422,7 @@ describeSqlite('sqlite persistence v2', () => {
     expect(assignments[0].policyPackId).toBe(policyPack.id)
     expect(bundles).toHaveLength(1)
     expect(bundles[0].redactionProfile).toBe('strict')
+    expect(bundles[0].truncated).toBe(false)
     expect(
       retentionPolicies.some(
         (policy) =>

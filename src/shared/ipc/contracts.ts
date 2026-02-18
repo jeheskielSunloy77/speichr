@@ -29,9 +29,14 @@ import type {
   HistoryQueryRequest,
   IncidentBundle,
   IncidentBundleExportRequest,
+  IncidentBundleExportStartRequest,
+  IncidentBundleExportJobCancelRequest,
+  IncidentBundleExportJobGetRequest,
+  IncidentBundleExportJobResumeRequest,
   IncidentBundleListRequest,
   IncidentBundlePreview,
   IncidentBundlePreviewRequest,
+  IncidentExportJob,
   KeyDeleteRequest,
   KeyGetRequest,
   KeyspaceActivityRequest,
@@ -96,6 +101,9 @@ export type CachifyCommand =
   | 'policy.pack.assign'
   | 'retention.policy.update'
   | 'retention.purge'
+  | 'incident.bundle.export.start'
+  | 'incident.bundle.export.cancel'
+  | 'incident.bundle.export.resume'
   | 'incident.bundle.export'
 
 export type CachifyQuery =
@@ -121,6 +129,7 @@ export type CachifyQuery =
   | 'policy.pack.assignment.list'
   | 'retention.policy.list'
   | 'storage.summary'
+  | 'incident.bundle.export.job.get'
   | 'incident.bundle.preview'
   | 'incident.bundle.list'
 
@@ -148,6 +157,9 @@ export interface CommandPayloadMap {
   'policy.pack.assign': GovernanceAssignmentRequest
   'retention.policy.update': RetentionPolicyUpdateRequest
   'retention.purge': RetentionPurgeRequest
+  'incident.bundle.export.start': IncidentBundleExportStartRequest
+  'incident.bundle.export.cancel': IncidentBundleExportJobCancelRequest
+  'incident.bundle.export.resume': IncidentBundleExportJobResumeRequest
   'incident.bundle.export': IncidentBundleExportRequest
 }
 
@@ -174,6 +186,7 @@ export interface QueryPayloadMap {
   'policy.pack.assignment.list': GovernanceAssignmentListRequest
   'retention.policy.list': Record<string, never>
   'storage.summary': Record<string, never>
+  'incident.bundle.export.job.get': IncidentBundleExportJobGetRequest
   'incident.bundle.preview': IncidentBundlePreviewRequest
   'incident.bundle.list': IncidentBundleListRequest
 }
@@ -202,6 +215,9 @@ export interface CommandResultMap {
   'policy.pack.assign': MutationResult
   'retention.policy.update': RetentionPolicy
   'retention.purge': RetentionPurgeResult
+  'incident.bundle.export.start': IncidentExportJob
+  'incident.bundle.export.cancel': IncidentExportJob
+  'incident.bundle.export.resume': IncidentExportJob
   'incident.bundle.export': IncidentBundle
 }
 
@@ -228,6 +244,7 @@ export interface QueryResultMap {
   'policy.pack.assignment.list': GovernanceAssignment[]
   'retention.policy.list': RetentionPolicyListResult
   'storage.summary': StorageSummary
+  'incident.bundle.export.job.get': IncidentExportJob
   'incident.bundle.preview': IncidentBundlePreview
   'incident.bundle.list': IncidentBundle[]
 }

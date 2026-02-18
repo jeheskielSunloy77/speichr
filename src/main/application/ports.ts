@@ -149,6 +149,11 @@ export interface EngineTimelineEventInput {
   details?: Record<string, unknown>
 }
 
+export interface EngineEventPollResult {
+  events: EngineTimelineEventInput[]
+  nextCursor?: string
+}
+
 export interface EngineEventIngestor {
   start: (args: {
     onEvent: (event: EngineTimelineEventInput) => Promise<void>
@@ -189,4 +194,9 @@ export interface CacheGateway {
     secret: ConnectionSecret,
     key: string,
   ) => Promise<void>
+  pollEngineEvents: (
+    profile: ConnectionProfile,
+    secret: ConnectionSecret,
+    args: { cursor?: string; limit: number },
+  ) => Promise<EngineEventPollResult>
 }

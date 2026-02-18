@@ -23,7 +23,11 @@ import {
   TableRow,
 } from '@/renderer/components/ui/table'
 import { unwrapResponse } from '@/renderer/features/common/ipc'
-import type { ConnectionProfile, IncidentBundleInclude } from '@/shared/contracts/cache'
+import type {
+  ConnectionProfile,
+  IncidentBundleInclude,
+  IncidentExportJob,
+} from '@/shared/contracts/cache'
 
 type ObservabilityPanelProps = {
   connection: ConnectionProfile
@@ -139,7 +143,17 @@ export const ObservabilityPanel = ({ connection }: ObservabilityPanelProps) => {
     metricCount: number
     estimatedSizeBytes: number
     checksumPreview: string
+    truncated: boolean
+    manifest: {
+      timelineEventIds: string[]
+      logEventIds: string[]
+      diagnosticEventIds: string[]
+      metricSnapshotIds: string[]
+    }
   } | null>(null)
+  const [incidentExportJobId, setIncidentExportJobId] = React.useState<string | null>(
+    null,
+  )
 
   const selectedIncidentIncludes = React.useMemo(
     () =>
@@ -237,6 +251,29 @@ export const ObservabilityPanel = ({ connection }: ObservabilityPanelProps) => {
       ),
   })
 
+  const incidentExportJobQuery = useQuery({
+    queryKey: ['incident-export-job', incidentExportJobId],
+    queryFn: async () =>
+      unwrapResponse(
+        await window.cachify.getIncidentBundleExportJob({
+          jobId: incidentExportJobId ?? '',
+        }),
+      ),
+    enabled: Boolean(incidentExportJobId),
+    refetchInterval: (query): number | false => {
+      const status = (query.state.data as IncidentExportJob | undefined)?.status
+      if (
+        status === 'success' ||
+        status === 'failed' ||
+        status === 'cancelled'
+      ) {
+        return false
+      }
+
+      return 1000
+    },
+  })
+
   const buildIncidentRequest = React.useCallback(() => {
     if (selectedIncidentIncludes.length === 0) {
       throw new Error('Select at least one incident artifact include option.')
@@ -270,6 +307,8 @@ export const ObservabilityPanel = ({ connection }: ObservabilityPanelProps) => {
         metricCount: preview.metricCount,
         estimatedSizeBytes: preview.estimatedSizeBytes,
         checksumPreview: preview.checksumPreview,
+        truncated: preview.truncated,
+        manifest: preview.manifest,
       })
       toast.success('Incident bundle preview generated.')
     },
@@ -283,7 +322,7 @@ export const ObservabilityPanel = ({ connection }: ObservabilityPanelProps) => {
   const incidentExportMutation = useMutation({
     mutationFn: async () =>
       unwrapResponse(
-        await window.cachify.exportIncidentBundle({
+        await window.cachify.startIncidentBundleExport({
           ...buildIncidentRequest(),
           destinationPath:
             incidentDestinationPath.trim().length > 0
@@ -291,9 +330,9 @@ export const ObservabilityPanel = ({ connection }: ObservabilityPanelProps) => {
               : undefined,
         }),
       ),
-    onSuccess: async (bundle) => {
-      toast.success(`Incident bundle exported to ${bundle.artifactPath}.`)
-      await queryClient.invalidateQueries({ queryKey: ['incident-bundles'] })
+    onSuccess: (job) => {
+      setIncidentExportJobId(job.id)
+      toast.success('Incident bundle export started.')
     },
     onError: (error) => {
       toast.error(
@@ -301,6 +340,85 @@ export const ObservabilityPanel = ({ connection }: ObservabilityPanelProps) => {
       )
     },
   })
+
+  const incidentCancelMutation = useMutation({
+    mutationFn: async () => {
+      if (!incidentExportJobId) {
+        return null
+      }
+
+      return unwrapResponse(
+        await window.cachify.cancelIncidentBundleExportJob({
+          jobId: incidentExportJobId,
+        }),
+      )
+    },
+    onSuccess: (job) => {
+      if (job) {
+        toast.success(`Export job ${job.status}.`)
+      }
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Unable to cancel export job.',
+      )
+    },
+  })
+
+  const incidentResumeMutation = useMutation({
+    mutationFn: async () => {
+      if (!incidentExportJobId) {
+        return null
+      }
+
+      return unwrapResponse(
+        await window.cachify.resumeIncidentBundleExportJob({
+          jobId: incidentExportJobId,
+        }),
+      )
+    },
+    onSuccess: (job) => {
+      if (job) {
+        toast.success('Incident export job resumed.')
+      }
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Unable to resume export job.',
+      )
+    },
+  })
+
+  const incidentNotifiedStatusRef = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    const job = incidentExportJobQuery.data
+    if (!job) {
+      return
+    }
+
+    const statusKey = `${job.id}:${job.status}`
+    if (incidentNotifiedStatusRef.current === statusKey) {
+      return
+    }
+
+    if (job.status === 'success') {
+      incidentNotifiedStatusRef.current = statusKey
+      toast.success(`Incident bundle exported to ${job.destinationPath}.`)
+      void queryClient.invalidateQueries({ queryKey: ['incident-bundles'] })
+      return
+    }
+
+    if (job.status === 'failed') {
+      incidentNotifiedStatusRef.current = statusKey
+      toast.error(job.errorMessage ?? 'Incident export job failed.')
+      return
+    }
+
+    if (job.status === 'cancelled') {
+      incidentNotifiedStatusRef.current = statusKey
+      toast('Incident export job cancelled.')
+    }
+  }, [incidentExportJobQuery.data, queryClient])
 
   const dashboard = dashboardQuery.data
 
@@ -342,24 +460,31 @@ export const ObservabilityPanel = ({ connection }: ObservabilityPanelProps) => {
           {dashboardQuery.isLoading ? (
             <p className='text-muted-foreground text-xs'>Loading dashboard...</p>
           ) : dashboard ? (
-            <div className='grid gap-3 md:grid-cols-2'>
-              {dashboard.health.map((health) => (
-                <div key={health.connectionId} className='space-y-2 border p-2 text-xs'>
-                  <div className='flex items-center justify-between gap-2'>
-                    <p className='truncate font-medium'>{health.connectionName}</p>
-                    <Badge variant={getHealthVariant(health.status)}>
-                      {health.status}
-                    </Badge>
+            <div className='space-y-2'>
+              {dashboard.truncated && (
+                <p className='text-muted-foreground text-xs'>
+                  Dashboard is sampled; refine filters for complete coverage.
+                </p>
+              )}
+              <div className='grid gap-3 md:grid-cols-2'>
+                {dashboard.health.map((health) => (
+                  <div key={health.connectionId} className='space-y-2 border p-2 text-xs'>
+                    <div className='flex items-center justify-between gap-2'>
+                      <p className='truncate font-medium'>{health.connectionName}</p>
+                      <Badge variant={getHealthVariant(health.status)}>
+                        {health.status}
+                      </Badge>
+                    </div>
+                    <div className='text-muted-foreground grid grid-cols-2 gap-1'>
+                      <span>env: {health.environment}</span>
+                      <span>p95: {health.latencyP95Ms}ms</span>
+                      <span>error: {(health.errorRate * 100).toFixed(1)}%</span>
+                      <span>ops/s: {health.opsPerSecond.toFixed(2)}</span>
+                      <span>slow ops: {health.slowOpCount}</span>
+                    </div>
                   </div>
-                  <div className='text-muted-foreground grid grid-cols-2 gap-1'>
-                    <span>env: {health.environment}</span>
-                    <span>p95: {health.latencyP95Ms}ms</span>
-                    <span>error: {(health.errorRate * 100).toFixed(1)}%</span>
-                    <span>ops/s: {health.opsPerSecond.toFixed(2)}</span>
-                    <span>slow ops: {health.slowOpCount}</span>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           ) : (
             <p className='text-muted-foreground text-xs'>No dashboard data yet.</p>
@@ -537,46 +662,52 @@ export const ObservabilityPanel = ({ connection }: ObservabilityPanelProps) => {
                   : 'Failed to load keyspace activity.'}
               </p>
             ) : (
-              <div className='grid gap-3 lg:grid-cols-2'>
-                <div className='max-h-64 overflow-auto border'>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Pattern</TableHead>
-                        <TableHead>Touches</TableHead>
-                        <TableHead>Errors</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(keyspaceQuery.data?.topPatterns ?? []).map((pattern) => (
-                        <TableRow key={pattern.pattern}>
-                          <TableCell>{pattern.pattern}</TableCell>
-                          <TableCell>{pattern.touchCount}</TableCell>
-                          <TableCell>{pattern.errorCount}</TableCell>
+              <div className='space-y-2'>
+                <p className='text-muted-foreground text-xs'>
+                  sampled events: {keyspaceQuery.data?.totalEvents ?? 0}
+                  {keyspaceQuery.data?.truncated ? ' (truncated)' : ''}
+                </p>
+                <div className='grid gap-3 lg:grid-cols-2'>
+                  <div className='max-h-64 overflow-auto border'>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Pattern</TableHead>
+                          <TableHead>Touches</TableHead>
+                          <TableHead>Errors</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-                <div className='max-h-64 overflow-auto border'>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Bucket</TableHead>
-                        <TableHead>Touches</TableHead>
-                        <TableHead>Errors</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(keyspaceQuery.data?.distribution ?? []).map((point) => (
-                        <TableRow key={point.bucket}>
-                          <TableCell>{new Date(point.bucket).toLocaleString()}</TableCell>
-                          <TableCell>{point.touches}</TableCell>
-                          <TableCell>{point.errors}</TableCell>
+                      </TableHeader>
+                      <TableBody>
+                        {(keyspaceQuery.data?.topPatterns ?? []).map((pattern) => (
+                          <TableRow key={pattern.pattern}>
+                            <TableCell>{pattern.pattern}</TableCell>
+                            <TableCell>{pattern.touchCount}</TableCell>
+                            <TableCell>{pattern.errorCount}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <div className='max-h-64 overflow-auto border'>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Bucket</TableHead>
+                          <TableHead>Touches</TableHead>
+                          <TableHead>Errors</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {(keyspaceQuery.data?.distribution ?? []).map((point) => (
+                          <TableRow key={point.bucket}>
+                            <TableCell>{new Date(point.bucket).toLocaleString()}</TableCell>
+                            <TableCell>{point.touches}</TableCell>
+                            <TableCell>{point.errors}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </div>
               </div>
             )}
@@ -634,25 +765,31 @@ export const ObservabilityPanel = ({ connection }: ObservabilityPanelProps) => {
                 No failed-operation diagnostics in this window.
               </p>
             ) : (
-              <div className='max-h-72 space-y-2 overflow-auto'>
-                {failedQuery.data?.diagnostics.map((diagnostic) => (
-                  <div key={diagnostic.event.id} className='space-y-1 border p-2 text-xs'>
-                    <div className='flex items-center justify-between gap-2'>
-                      <p className='truncate font-medium'>{diagnostic.event.action}</p>
-                      <Badge variant='destructive'>{diagnostic.event.status}</Badge>
+              <div className='space-y-2'>
+                <p className='text-muted-foreground text-xs'>
+                  error events: {failedQuery.data?.totalErrorEvents ?? 0}
+                  {failedQuery.data?.truncated ? ' (truncated)' : ''}
+                </p>
+                <div className='max-h-72 space-y-2 overflow-auto'>
+                  {failedQuery.data?.diagnostics.map((diagnostic) => (
+                    <div key={diagnostic.event.id} className='space-y-1 border p-2 text-xs'>
+                      <div className='flex items-center justify-between gap-2'>
+                        <p className='truncate font-medium'>{diagnostic.event.action}</p>
+                        <Badge variant='destructive'>{diagnostic.event.status}</Badge>
+                      </div>
+                      <p className='text-muted-foreground truncate'>
+                        {diagnostic.event.keyOrPattern}
+                      </p>
+                      <div className='text-muted-foreground flex flex-wrap gap-2'>
+                        <span>retries: {diagnostic.retryAttempts}</span>
+                        <span>related events: {diagnostic.relatedEvents.length}</span>
+                        <span>
+                          occurred: {new Date(diagnostic.event.timestamp).toLocaleString()}
+                        </span>
+                      </div>
                     </div>
-                    <p className='text-muted-foreground truncate'>
-                      {diagnostic.event.keyOrPattern}
-                    </p>
-                    <div className='text-muted-foreground flex flex-wrap gap-2'>
-                      <span>retries: {diagnostic.retryAttempts}</span>
-                      <span>related events: {diagnostic.relatedEvents.length}</span>
-                      <span>
-                        occurred: {new Date(diagnostic.event.timestamp).toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
           </CardContent>
@@ -715,39 +852,47 @@ export const ObservabilityPanel = ({ connection }: ObservabilityPanelProps) => {
                 : 'Failed to compare periods.'}
             </p>
           ) : (
-            <div className='max-h-72 overflow-auto border'>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Metric</TableHead>
-                    <TableHead>Baseline</TableHead>
-                    <TableHead>Compare</TableHead>
-                    <TableHead>Delta</TableHead>
-                    <TableHead>Direction</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(compareQuery.data?.metrics ?? []).map((metric) => (
-                    <TableRow key={metric.metric}>
-                      <TableCell>{metric.metric}</TableCell>
-                      <TableCell>{metric.baseline}</TableCell>
-                      <TableCell>{metric.compare}</TableCell>
-                      <TableCell>
-                        {metric.delta} (
-                        {metric.deltaPercent === null
-                          ? 'n/a'
-                          : `${metric.deltaPercent}%`}
-                        )
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={getDirectionVariant(metric.direction)}>
-                          {metric.direction}
-                        </Badge>
-                      </TableCell>
+            <div className='space-y-2'>
+              <p className='text-muted-foreground text-xs'>
+                sampled baseline events: {compareQuery.data?.baselineSampledEvents ?? 0}
+                {' | '}
+                sampled compare events: {compareQuery.data?.compareSampledEvents ?? 0}
+                {compareQuery.data?.truncated ? ' (truncated)' : ''}
+              </p>
+              <div className='max-h-72 overflow-auto border'>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Metric</TableHead>
+                      <TableHead>Baseline</TableHead>
+                      <TableHead>Compare</TableHead>
+                      <TableHead>Delta</TableHead>
+                      <TableHead>Direction</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {(compareQuery.data?.metrics ?? []).map((metric) => (
+                      <TableRow key={metric.metric}>
+                        <TableCell>{metric.metric}</TableCell>
+                        <TableCell>{metric.baseline}</TableCell>
+                        <TableCell>{metric.compare}</TableCell>
+                        <TableCell>
+                          {metric.delta} (
+                          {metric.deltaPercent === null
+                            ? 'n/a'
+                            : `${metric.deltaPercent}%`}
+                          )
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={getDirectionVariant(metric.direction)}>
+                            {metric.direction}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           )}
         </CardContent>
@@ -840,9 +985,32 @@ export const ObservabilityPanel = ({ connection }: ObservabilityPanelProps) => {
               onClick={() => incidentExportMutation.mutate()}
               disabled={incidentExportMutation.isPending}
             >
-              Export Bundle
+              Start Export
+            </Button>
+            <Button
+              variant='outline'
+              onClick={() => incidentCancelMutation.mutate()}
+              disabled={!incidentExportJobId || incidentCancelMutation.isPending}
+            >
+              Cancel Export
+            </Button>
+            <Button
+              variant='outline'
+              onClick={() => incidentResumeMutation.mutate()}
+              disabled={!incidentExportJobId || incidentResumeMutation.isPending}
+            >
+              Resume Export
             </Button>
           </div>
+
+          {incidentExportJobQuery.data && (
+            <div className='grid gap-2 rounded-none border p-2 text-xs md:grid-cols-4'>
+              <span>job: {incidentExportJobQuery.data.id}</span>
+              <span>status: {incidentExportJobQuery.data.status}</span>
+              <span>stage: {incidentExportJobQuery.data.stage}</span>
+              <span>progress: {incidentExportJobQuery.data.progressPercent}%</span>
+            </div>
+          )}
 
           {incidentPreview && (
             <div className='grid gap-2 rounded-none border p-2 text-xs md:grid-cols-3'>
@@ -852,6 +1020,13 @@ export const ObservabilityPanel = ({ connection }: ObservabilityPanelProps) => {
               <span>metrics: {incidentPreview.metricCount}</span>
               <span>size: {incidentPreview.estimatedSizeBytes} bytes</span>
               <span className='truncate'>checksum: {incidentPreview.checksumPreview}</span>
+              <span>truncated: {incidentPreview.truncated ? 'yes' : 'no'}</span>
+              <span>
+                manifest timeline IDs: {incidentPreview.manifest.timelineEventIds.length}
+              </span>
+              <span>
+                manifest snapshot IDs: {incidentPreview.manifest.metricSnapshotIds.length}
+              </span>
             </div>
           )}
 
@@ -869,6 +1044,7 @@ export const ObservabilityPanel = ({ connection }: ObservabilityPanelProps) => {
                       <TableHead>Created</TableHead>
                       <TableHead>Redaction</TableHead>
                       <TableHead>Artifacts</TableHead>
+                      <TableHead>Truncated</TableHead>
                       <TableHead>Checksum</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -881,6 +1057,7 @@ export const ObservabilityPanel = ({ connection }: ObservabilityPanelProps) => {
                           {bundle.timelineCount}/{bundle.logCount}/
                           {bundle.diagnosticCount}/{bundle.metricCount}
                         </TableCell>
+                        <TableCell>{bundle.truncated ? 'yes' : 'no'}</TableCell>
                         <TableCell className='max-w-56 truncate'>{bundle.checksum}</TableCell>
                       </TableRow>
                     ))}

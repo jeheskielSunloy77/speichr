@@ -19,6 +19,10 @@ import type {
   GovernancePolicyPackUpdateRequest,
   HistoryQueryRequest,
   IncidentBundleExportRequest,
+  IncidentBundleExportStartRequest,
+  IncidentBundleExportJobCancelRequest,
+  IncidentBundleExportJobGetRequest,
+  IncidentBundleExportJobResumeRequest,
   IncidentBundleListRequest,
   IncidentBundlePreviewRequest,
   KeyDeleteRequest,
@@ -145,6 +149,24 @@ export interface CachifyApi {
   exportIncidentBundle: (
     payload: IncidentBundleExportRequest,
   ) => Promise<IpcResponseEnvelope<CommandResultMap['incident.bundle.export']>>
+  startIncidentBundleExport: (
+    payload: IncidentBundleExportStartRequest,
+  ) => Promise<
+    IpcResponseEnvelope<CommandResultMap['incident.bundle.export.start']>
+  >
+  cancelIncidentBundleExportJob: (
+    payload: IncidentBundleExportJobCancelRequest,
+  ) => Promise<
+    IpcResponseEnvelope<CommandResultMap['incident.bundle.export.cancel']>
+  >
+  resumeIncidentBundleExportJob: (
+    payload: IncidentBundleExportJobResumeRequest,
+  ) => Promise<
+    IpcResponseEnvelope<CommandResultMap['incident.bundle.export.resume']>
+  >
+  getIncidentBundleExportJob: (
+    payload: IncidentBundleExportJobGetRequest,
+  ) => Promise<IpcResponseEnvelope<QueryResultMap['incident.bundle.export.job.get']>>
   listAlerts: (
     payload: AlertListRequest,
   ) => Promise<IpcResponseEnvelope<QueryResultMap['alert.list']>>

@@ -247,7 +247,8 @@ const runMigrations = (db: BetterSqlite3.Database): void => {
       timeline_count INTEGER NOT NULL,
       log_count INTEGER NOT NULL,
       diagnostic_count INTEGER NOT NULL,
-      metric_count INTEGER NOT NULL
+      metric_count INTEGER NOT NULL,
+      truncated INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS retention_policies (
@@ -324,6 +325,12 @@ const runMigrations = (db: BetterSqlite3.Database): void => {
     'workflow_executions',
     'resumed_from_execution_id',
     'TEXT',
+  )
+  addColumnIfMissing(
+    db,
+    'incident_bundles',
+    'truncated',
+    'INTEGER NOT NULL DEFAULT 0',
   )
 
   const upsertRetentionDefaults = db.prepare(`
@@ -1979,6 +1986,7 @@ type IncidentBundleRow = {
   log_count: number
   diagnostic_count: number
   metric_count: number
+  truncated: number
 }
 
 const rowToIncidentBundle = (row: IncidentBundleRow): IncidentBundle => ({
@@ -1995,6 +2003,7 @@ const rowToIncidentBundle = (row: IncidentBundleRow): IncidentBundle => ({
   logCount: row.log_count,
   diagnosticCount: row.diagnostic_count,
   metricCount: row.metric_count,
+  truncated: row.truncated === 1,
 })
 
 export class SqliteIncidentBundleRepository implements IncidentBundleRepository {
@@ -2008,6 +2017,7 @@ export class SqliteIncidentBundleRepository implements IncidentBundleRepository 
     string,
     string,
     string,
+    number,
     number,
     number,
     number,
@@ -2034,8 +2044,9 @@ export class SqliteIncidentBundleRepository implements IncidentBundleRepository 
         timeline_count,
         log_count,
         diagnostic_count,
-        metric_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        metric_count,
+        truncated
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         created_at = excluded.created_at,
         from_ts = excluded.from_ts,
@@ -2048,7 +2059,8 @@ export class SqliteIncidentBundleRepository implements IncidentBundleRepository 
         timeline_count = excluded.timeline_count,
         log_count = excluded.log_count,
         diagnostic_count = excluded.diagnostic_count,
-        metric_count = excluded.metric_count
+        metric_count = excluded.metric_count,
+        truncated = excluded.truncated
     `)
 
     this.listStatement = this.db.prepare(`
@@ -2065,7 +2077,8 @@ export class SqliteIncidentBundleRepository implements IncidentBundleRepository 
         timeline_count,
         log_count,
         diagnostic_count,
-        metric_count
+        metric_count,
+        truncated
       FROM incident_bundles
       ORDER BY created_at DESC
       LIMIT ?
@@ -2087,6 +2100,7 @@ export class SqliteIncidentBundleRepository implements IncidentBundleRepository 
       bundle.logCount,
       bundle.diagnosticCount,
       bundle.metricCount,
+      bundle.truncated ? 1 : 0,
     )
   }
 
