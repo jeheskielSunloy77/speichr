@@ -24,10 +24,7 @@
 		"test:integration:stable": "bun run native:rebuild && bun run test:integration",
 		"test:smoke": "vitest run src/smoke",
 		"test:watch": "vitest",
-		"test:all": "bun run test && bun run test:provider && bun run test:migration && bun run test:integration:stable && bun run test:smoke",
-		"ci:pr": "bun run typecheck && bun run lint && bun run check:boundaries && bun run test && bun run test:provider && bun run check:migrations && bun run test:migration",
-		"ci:main": "bun run ci:pr && bun run test:integration:stable && bun run test:smoke",
-		"ci:nightly": "bun run ci:main"
+		"test:all": "bun run test && bun run test:provider && bun run test:migration && bun run test:integration:stable && bun run test:smoke"
 	},
 	"keywords": [],
 	"author": {
