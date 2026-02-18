@@ -1,8 +1,8 @@
 {
 	"name": "cachify-studio",
-	"productName": "cachify-studio",
+	"productName": "Cachify Studio",
 	"version": "1.0.0",
-	"description": "My Electron application description",
+	"description": "Desktop operations studio for managing cache connections, workflows, observability, and incident exports.",
 	"main": ".vite/build/main.js",
 	"private": true,
 	"scripts": {
@@ -14,6 +14,7 @@
 		"typecheck": "tsc --noEmit",
 		"check:boundaries": "bun run scripts/ci/check-import-boundaries.ts",
 		"check:migrations": "bun run scripts/ci/check-migration-integrity.ts",
+		"check:release:readiness": "bun run scripts/ci/check-release-readiness.ts",
 		"test": "bun run test:unit && bun run test:contract",
 		"test:unit": "vitest run src/main/application/cachify-service.test.ts src/main/policies/read-only-policy.test.ts",
 		"test:contract": "vitest run src/shared/schemas/ipc.test.ts src/renderer/features/common/ipc.test.ts",
@@ -26,7 +27,22 @@
 		"test:watch": "vitest",
 		"test:all": "bun run test && bun run test:provider && bun run test:migration && bun run test:integration:stable && bun run test:smoke"
 	},
-	"keywords": [],
+	"keywords": [
+		"electron",
+		"desktop",
+		"cache",
+		"memcached",
+		"redis",
+		"operations"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/jeheskielSunloy77/cachify-studio.git"
+	},
+	"homepage": "https://github.com/jeheskielSunloy77/cachify-studio#readme",
+	"bugs": {
+		"url": "https://github.com/jeheskielSunloy77/cachify-studio/issues"
+	},
 	"author": {
 		"name": "jeheskielSunloy77",
 		"email": "jeheskielventiokysunloy@gmail.com"
@@ -35,7 +51,6 @@
 	"devDependencies": {
 		"@electron-forge/cli": "^7.11.1",
 		"@electron-forge/maker-deb": "^7.11.1",
-		"@electron-forge/maker-rpm": "^7.11.1",
 		"@electron-forge/maker-squirrel": "^7.11.1",
 		"@electron-forge/maker-zip": "^7.11.1",
 		"@electron-forge/plugin-auto-unpack-natives": "^7.11.1",

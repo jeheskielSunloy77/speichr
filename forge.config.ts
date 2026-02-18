@@ -2,7 +2,6 @@ import type { ForgeConfig } from '@electron-forge/shared-types';
 import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerZIP } from '@electron-forge/maker-zip';
 import { MakerDeb } from '@electron-forge/maker-deb';
-import { MakerRpm } from '@electron-forge/maker-rpm';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
@@ -10,13 +9,36 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    icon: 'assets/icon',
+    executableName: 'cachify-studio',
+    appBundleId: 'com.cachify.studio',
+    appCategoryType: 'public.app-category.developer-tools',
+    win32metadata: {
+      CompanyName: 'Cachify Studio',
+      FileDescription: 'Cachify Studio desktop application',
+      OriginalFilename: 'Cachify Studio.exe',
+      ProductName: 'Cachify Studio',
+    },
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({}),
-    new MakerZIP({}, ['darwin']),
-    new MakerRpm({}),
-    new MakerDeb({}),
+    new MakerSquirrel({}, ['win32']),
+    new MakerZIP({}, ['darwin', 'linux']),
+    new MakerDeb(
+      {
+        options: {
+          maintainer: 'jeheskielSunloy77 <jeheskielventiokysunloy@gmail.com>',
+          homepage: 'https://github.com/jeheskielSunloy77/cachify-studio',
+          icon: 'assets/icon.png',
+          categories: ['Development', 'Utility'],
+          synopsis:
+            'Desktop operations studio for cache workflows and observability',
+          description:
+            'Cachify Studio is an Electron desktop app for managing cache connections, key workflows, observability, and incident exports.',
+        },
+      },
+      ['linux'],
+    ),
   ],
   plugins: [
     new VitePlugin({

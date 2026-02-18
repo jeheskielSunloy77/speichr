@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -37,6 +38,7 @@ jobs:
           bun run typecheck
           bun run lint
           bun run check:boundaries
+          bun run check:release:readiness
           bun run test
           bun run test:provider
           bun run check:migrations
@@ -107,6 +109,13 @@ jobs:
           pattern: release-assets-*
           merge-multiple: true
           path: release-artifacts
+
+      - name: Generate release checksums
+        run: |
+          cd release-artifacts
+          find . -type f ! -name SHA256SUMS.txt -print0 \
+            | sort -z \
+            | xargs -0 sha256sum > SHA256SUMS.txt
 
       - name: Create or update GitHub draft release
         uses: softprops/action-gh-release@v2
