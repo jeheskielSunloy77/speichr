@@ -1,9 +1,12 @@
+import { createRequire } from 'node:module'
+
 import type { ConnectionSecret } from '../../../shared/contracts/cache'
 
 import type { SecretStore } from '../../application/ports'
 import { OperationFailure } from '../../domain/operation-failure'
 
 const SERVICE_NAME = 'cachify-studio'
+const nodeRequire = createRequire(__filename)
 type KeytarModule = {
   deletePassword: (service: string, account: string) => Promise<boolean>
   getPassword: (service: string, account: string) => Promise<string | null>
@@ -17,7 +20,7 @@ type KeytarModule = {
 const loadKeytar = (): KeytarModule => {
   try {
     const moduleName = 'keytar'
-    return require(moduleName) as KeytarModule
+    return nodeRequire(moduleName) as KeytarModule
   } catch (error) {
     throw new OperationFailure(
       'INTERNAL_ERROR',
