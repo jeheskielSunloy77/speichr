@@ -1,24 +1,53 @@
-import { deletePassword, getPassword, setPassword } from 'keytar'
-
 import type { ConnectionSecret } from '../../../shared/contracts/cache'
 
 import type { SecretStore } from '../../application/ports'
 import { OperationFailure } from '../../domain/operation-failure'
 
 const SERVICE_NAME = 'cachify-studio'
+type KeytarModule = {
+  deletePassword: (service: string, account: string) => Promise<boolean>
+  getPassword: (service: string, account: string) => Promise<string | null>
+  setPassword: (
+    service: string,
+    account: string,
+    password: string,
+  ) => Promise<void>
+}
+
+const loadKeytar = (): KeytarModule => {
+  try {
+    const moduleName = 'keytar'
+    return require(moduleName) as KeytarModule
+  } catch (error) {
+    throw new OperationFailure(
+      'INTERNAL_ERROR',
+      'System keychain integration is unavailable on this environment.',
+      false,
+      {
+        cause: error instanceof Error ? error.message : 'unknown',
+      },
+    )
+  }
+}
 
 export class KeytarSecretStore implements SecretStore {
+  private readonly keytar: KeytarModule
+
+  public constructor() {
+    this.keytar = loadKeytar()
+  }
+
   public async saveSecret(
     profileId: string,
     secret: ConnectionSecret,
   ): Promise<void> {
     const payload = JSON.stringify(secret)
 
-    await setPassword(SERVICE_NAME, profileId, payload)
+    await this.keytar.setPassword(SERVICE_NAME, profileId, payload)
   }
 
   public async getSecret(profileId: string): Promise<ConnectionSecret> {
-    const value = await getPassword(SERVICE_NAME, profileId)
+    const value = await this.keytar.getPassword(SERVICE_NAME, profileId)
 
     if (!value) {
       throw new OperationFailure(
@@ -45,6 +74,6 @@ export class KeytarSecretStore implements SecretStore {
   }
 
   public async deleteSecret(profileId: string): Promise<void> {
-    await deletePassword(SERVICE_NAME, profileId)
+    await this.keytar.deletePassword(SERVICE_NAME, profileId)
   }
 }

@@ -65,10 +65,17 @@ const initializeRuntime = (): RuntimeContext => {
   const incidentBundleRepository = new SqliteIncidentBundleRepository(db)
   const retentionRepository = new SqliteRetentionRepository(db)
 
-  const secretStore =
-    process.env.CACHIFY_SECRET_STORE === 'memory'
-      ? new InMemorySecretStore()
-      : new KeytarSecretStore()
+  const secretStore = (() => {
+    if (process.env.CACHIFY_SECRET_STORE === 'memory') {
+      return new InMemorySecretStore()
+    }
+
+    try {
+      return new KeytarSecretStore()
+    } catch (_error) {
+      return new InMemorySecretStore()
+    }
+  })()
 
   const cacheGateway = new DefaultCacheGateway(memcachedKeyIndexRepository)
   const engineEventIngestor = new ProviderEngineEventIngestor(
