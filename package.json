@@ -1,7 +1,7 @@
 {
 	"name": "cachify-studio",
 	"productName": "Cachify Studio",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "Desktop operations studio for managing cache connections, workflows, observability, and incident exports.",
 	"main": ".vite/build/main.js",
 	"private": true,
