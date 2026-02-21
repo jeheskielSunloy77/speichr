@@ -184,7 +184,7 @@ export const ConnectionFormDialog = ({
 		setIsTesting(true)
 		try {
 			const result = unwrapResponse(
-				await window.cachify.testConnection({
+				await window.speichr.testConnection({
 					connectionId:
 						mode === 'edit' && initialProfile ? initialProfile.id : undefined,
 					profile: draft,
@@ -213,7 +213,7 @@ export const ConnectionFormDialog = ({
 		try {
 			if (mode === 'create') {
 				const profile = unwrapResponse(
-					await window.cachify.createConnection({
+					await window.speichr.createConnection({
 						profile: draft,
 						secret,
 					}),
@@ -225,7 +225,7 @@ export const ConnectionFormDialog = ({
 				const includeSecret = Boolean(secret.username || secret.password)
 
 				const profile = unwrapResponse(
-					await window.cachify.updateConnection({
+					await window.speichr.updateConnection({
 						id: initialProfile.id,
 						profile: draft,
 						secret: includeSecret ? secret : undefined,
@@ -360,9 +360,7 @@ export const ConnectionFormDialog = ({
 						<Input
 							id='connection-retry-backoff'
 							value={form.retryBackoffMs}
-							onChange={(event) =>
-								onFieldChange('retryBackoffMs', event.target.value)
-							}
+							onChange={(event) => onFieldChange('retryBackoffMs', event.target.value)}
 						/>
 					</div>
 
@@ -448,9 +446,7 @@ export const ConnectionFormDialog = ({
 						<span>Force read-only policy</span>
 						<Switch
 							checked={form.forceReadOnly}
-							onCheckedChange={(checked) =>
-								onFieldChange('forceReadOnly', checked)
-							}
+							onCheckedChange={(checked) => onFieldChange('forceReadOnly', checked)}
 						/>
 					</div>
 				</div>

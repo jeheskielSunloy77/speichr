@@ -1,9 +1,9 @@
-import type { CachifyApi } from '../../shared/contracts/api'
+import type { SpeichrApi } from '../../shared/contracts/api'
 
 declare global {
-  interface Window {
-    cachify: CachifyApi
-  }
+	interface Window {
+		speichr: SpeichrApi
+	}
 }
 
 export {}

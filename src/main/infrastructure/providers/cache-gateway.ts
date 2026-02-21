@@ -2,547 +2,550 @@ import { Client as MemjsClient } from 'memjs'
 import { createClient, type RedisClientType } from 'redis'
 
 import type {
-  ConnectionDraft,
-  ConnectionProfile,
-  ConnectionSecret,
-  ConnectionTestResult,
-  KeyListResult,
-  KeyValueRecord,
-  ProviderCapabilities,
+	ConnectionDraft,
+	ConnectionProfile,
+	ConnectionSecret,
+	ConnectionTestResult,
+	KeyListResult,
+	KeyValueRecord,
+	ProviderCapabilities,
 } from '../../../shared/contracts/cache'
 
 import type {
-  CacheGateway,
-  EngineEventPollResult,
-  MemcachedKeyIndexRepository,
+	CacheGateway,
+	EngineEventPollResult,
+	MemcachedKeyIndexRepository,
 } from '../../application/ports'
 import { OperationFailure } from '../../domain/operation-failure'
 
 const REDIS_CAPABILITIES: ProviderCapabilities = {
-  supportsTTL: true,
-  supportsMonitorStream: false,
-  supportsSlowLog: true,
-  supportsBulkDeletePreview: false,
-  supportsSnapshotRestore: false,
-  supportsPatternScan: true,
+	supportsTTL: true,
+	supportsMonitorStream: false,
+	supportsSlowLog: true,
+	supportsBulkDeletePreview: false,
+	supportsSnapshotRestore: false,
+	supportsPatternScan: true,
 }
 
 const MEMCACHED_CAPABILITIES: ProviderCapabilities = {
-  supportsTTL: true,
-  supportsMonitorStream: false,
-  supportsSlowLog: false,
-  supportsBulkDeletePreview: false,
-  supportsSnapshotRestore: false,
-  supportsPatternScan: true,
+	supportsTTL: true,
+	supportsMonitorStream: false,
+	supportsSlowLog: false,
+	supportsBulkDeletePreview: false,
+	supportsSnapshotRestore: false,
+	supportsPatternScan: true,
 }
 
 const MAX_SCAN_LOOP = 25
 
 type EngineConnection = Pick<
-  ConnectionProfile,
-  'engine' | 'host' | 'port' | 'dbIndex' | 'tlsEnabled' | 'timeoutMs'
+	ConnectionProfile,
+	'engine' | 'host' | 'port' | 'dbIndex' | 'tlsEnabled' | 'timeoutMs'
 >
 
 export class DefaultCacheGateway implements CacheGateway {
-  public constructor(
-    private readonly memcachedIndexRepository: MemcachedKeyIndexRepository,
-  ) {}
+	public constructor(
+		private readonly memcachedIndexRepository: MemcachedKeyIndexRepository,
+	) {}
 
-  public getCapabilities(
-    profile: Pick<ConnectionProfile, 'engine'>,
-  ): ProviderCapabilities {
-    return profile.engine === 'redis'
-      ? REDIS_CAPABILITIES
-      : MEMCACHED_CAPABILITIES
-  }
+	public getCapabilities(
+		profile: Pick<ConnectionProfile, 'engine'>,
+	): ProviderCapabilities {
+		return profile.engine === 'redis'
+			? REDIS_CAPABILITIES
+			: MEMCACHED_CAPABILITIES
+	}
 
-  public async testConnection(
-    profile: ConnectionDraft,
-    secret: ConnectionSecret,
-  ): Promise<ConnectionTestResult> {
-    if (profile.engine === 'redis') {
-      return this.testRedisConnection(profile, secret)
-    }
+	public async testConnection(
+		profile: ConnectionDraft,
+		secret: ConnectionSecret,
+	): Promise<ConnectionTestResult> {
+		if (profile.engine === 'redis') {
+			return this.testRedisConnection(profile, secret)
+		}
 
-    return this.testMemcachedConnection(profile, secret)
-  }
+		return this.testMemcachedConnection(profile, secret)
+	}
 
-  public async listKeys(
-    profile: ConnectionProfile,
-    secret: ConnectionSecret,
-    args: { cursor?: string; limit: number },
-  ): Promise<KeyListResult> {
-    if (profile.engine === 'redis') {
-      return this.redisListKeys(profile, secret, args)
-    }
+	public async listKeys(
+		profile: ConnectionProfile,
+		secret: ConnectionSecret,
+		args: { cursor?: string; limit: number },
+	): Promise<KeyListResult> {
+		if (profile.engine === 'redis') {
+			return this.redisListKeys(profile, secret, args)
+		}
 
-    const keys = await this.memcachedIndexRepository.listKeys(profile.id, args.limit)
+		const keys = await this.memcachedIndexRepository.listKeys(
+			profile.id,
+			args.limit,
+		)
 
-    return {
-      keys,
-      nextCursor: undefined,
-    }
-  }
+		return {
+			keys,
+			nextCursor: undefined,
+		}
+	}
 
-  public async searchKeys(
-    profile: ConnectionProfile,
-    secret: ConnectionSecret,
-    args: { pattern: string; limit: number; cursor?: string },
-  ): Promise<KeyListResult> {
-    if (profile.engine === 'redis') {
-      return this.redisSearchKeys(profile, secret, args)
-    }
+	public async searchKeys(
+		profile: ConnectionProfile,
+		secret: ConnectionSecret,
+		args: { pattern: string; limit: number; cursor?: string },
+	): Promise<KeyListResult> {
+		if (profile.engine === 'redis') {
+			return this.redisSearchKeys(profile, secret, args)
+		}
 
-    const keys = await this.memcachedIndexRepository.searchKeys(
-      profile.id,
-      args.pattern,
-      args.limit,
-      args.cursor,
-    )
-    const nextCursor =
-      keys.length === args.limit && keys.length > 0
-        ? keys[keys.length - 1]
-        : undefined
+		const keys = await this.memcachedIndexRepository.searchKeys(
+			profile.id,
+			args.pattern,
+			args.limit,
+			args.cursor,
+		)
+		const nextCursor =
+			keys.length === args.limit && keys.length > 0
+				? keys[keys.length - 1]
+				: undefined
 
-    return {
-      keys,
-      nextCursor,
-    }
-  }
+		return {
+			keys,
+			nextCursor,
+		}
+	}
 
-  public async getValue(
-    profile: ConnectionProfile,
-    secret: ConnectionSecret,
-    key: string,
-  ): Promise<KeyValueRecord> {
-    if (profile.engine === 'redis') {
-      return this.redisGetValue(profile, secret, key)
-    }
+	public async getValue(
+		profile: ConnectionProfile,
+		secret: ConnectionSecret,
+		key: string,
+	): Promise<KeyValueRecord> {
+		if (profile.engine === 'redis') {
+			return this.redisGetValue(profile, secret, key)
+		}
 
-    const client = this.createMemcachedClient(profile, secret)
-    try {
-      const result = await client.get(key)
-      await this.memcachedIndexRepository.upsertKey(profile.id, key)
+		const client = this.createMemcachedClient(profile, secret)
+		try {
+			const result = await client.get(key)
+			await this.memcachedIndexRepository.upsertKey(profile.id, key)
 
-      const rawValue = result.value
-      const value = rawValue ? rawValue.toString('utf8') : null
+			const rawValue = result.value
+			const value = rawValue ? rawValue.toString('utf8') : null
 
-      return {
-        key,
-        value,
-        ttlSeconds: null,
-        supportsTTL: true,
-      }
-    } catch (error) {
-      throw this.toConnectionFailure(error)
-    } finally {
-      client.quit()
-    }
-  }
+			return {
+				key,
+				value,
+				ttlSeconds: null,
+				supportsTTL: true,
+			}
+		} catch (error) {
+			throw this.toConnectionFailure(error)
+		} finally {
+			client.quit()
+		}
+	}
 
-  public async setValue(
-    profile: ConnectionProfile,
-    secret: ConnectionSecret,
-    args: { key: string; value: string; ttlSeconds?: number },
-  ): Promise<void> {
-    if (profile.engine === 'redis') {
-      await this.redisSetValue(profile, secret, args)
-      return
-    }
+	public async setValue(
+		profile: ConnectionProfile,
+		secret: ConnectionSecret,
+		args: { key: string; value: string; ttlSeconds?: number },
+	): Promise<void> {
+		if (profile.engine === 'redis') {
+			await this.redisSetValue(profile, secret, args)
+			return
+		}
 
-    const client = this.createMemcachedClient(profile, secret)
-    try {
-      await client.set(args.key, args.value, {
-        expires: args.ttlSeconds ?? 0,
-      })
-      await this.memcachedIndexRepository.upsertKey(profile.id, args.key)
-    } catch (error) {
-      throw this.toConnectionFailure(error)
-    } finally {
-      client.quit()
-    }
-  }
+		const client = this.createMemcachedClient(profile, secret)
+		try {
+			await client.set(args.key, args.value, {
+				expires: args.ttlSeconds ?? 0,
+			})
+			await this.memcachedIndexRepository.upsertKey(profile.id, args.key)
+		} catch (error) {
+			throw this.toConnectionFailure(error)
+		} finally {
+			client.quit()
+		}
+	}
 
-  public async deleteKey(
-    profile: ConnectionProfile,
-    secret: ConnectionSecret,
-    key: string,
-  ): Promise<void> {
-    if (profile.engine === 'redis') {
-      await this.redisDeleteKey(profile, secret, key)
-      return
-    }
+	public async deleteKey(
+		profile: ConnectionProfile,
+		secret: ConnectionSecret,
+		key: string,
+	): Promise<void> {
+		if (profile.engine === 'redis') {
+			await this.redisDeleteKey(profile, secret, key)
+			return
+		}
 
-    const client = this.createMemcachedClient(profile, secret)
-    try {
-      await client.delete(key)
-      await this.memcachedIndexRepository.removeKey(profile.id, key)
-    } catch (error) {
-      throw this.toConnectionFailure(error)
-    } finally {
-      client.quit()
-    }
-  }
+		const client = this.createMemcachedClient(profile, secret)
+		try {
+			await client.delete(key)
+			await this.memcachedIndexRepository.removeKey(profile.id, key)
+		} catch (error) {
+			throw this.toConnectionFailure(error)
+		} finally {
+			client.quit()
+		}
+	}
 
-  public async pollEngineEvents(
-    profile: ConnectionProfile,
-    secret: ConnectionSecret,
-    args: { cursor?: string; limit: number },
-  ): Promise<EngineEventPollResult> {
-    if (profile.engine !== 'redis') {
-      return {
-        events: [],
-        nextCursor: args.cursor,
-      }
-    }
+	public async pollEngineEvents(
+		profile: ConnectionProfile,
+		secret: ConnectionSecret,
+		args: { cursor?: string; limit: number },
+	): Promise<EngineEventPollResult> {
+		if (profile.engine !== 'redis') {
+			return {
+				events: [],
+				nextCursor: args.cursor,
+			}
+		}
 
-    const client = this.createRedisClient(profile, secret)
-    const sinceIdRaw = Number(args.cursor)
-    const sinceId = Number.isFinite(sinceIdRaw) ? sinceIdRaw : -1
-    const limit = Math.min(256, Math.max(1, args.limit))
+		const client = this.createRedisClient(profile, secret)
+		const sinceIdRaw = Number(args.cursor)
+		const sinceId = Number.isFinite(sinceIdRaw) ? sinceIdRaw : -1
+		const limit = Math.min(256, Math.max(1, args.limit))
 
-    try {
-      await client.connect()
+		try {
+			await client.connect()
 
-      const rawEntries = await client.sendCommand([
-        'SLOWLOG',
-        'GET',
-        String(limit),
-      ])
-      if (!Array.isArray(rawEntries)) {
-        return {
-          events: [],
-          nextCursor: args.cursor,
-        }
-      }
+			const rawEntries = await client.sendCommand([
+				'SLOWLOG',
+				'GET',
+				String(limit),
+			])
+			if (!Array.isArray(rawEntries)) {
+				return {
+					events: [],
+					nextCursor: args.cursor,
+				}
+			}
 
-      const parsedEntries = rawEntries
-        .map((entry) => parseRedisSlowLogEntry(entry))
-        .filter((entry): entry is RedisSlowLogEntry => Boolean(entry))
-        .filter((entry) => entry.id > sinceId)
-        .sort((left, right) => left.id - right.id)
+			const parsedEntries = rawEntries
+				.map((entry) => parseRedisSlowLogEntry(entry))
+				.filter((entry): entry is RedisSlowLogEntry => Boolean(entry))
+				.filter((entry) => entry.id > sinceId)
+				.sort((left, right) => left.id - right.id)
 
-      const events = parsedEntries.map((entry) => ({
-        timestamp: new Date(entry.startedAtSeconds * 1000).toISOString(),
-        connectionId: profile.id,
-        environment: profile.environment,
-        action: `redis.slowlog.${entry.command.toLowerCase()}`,
-        keyOrPattern: entry.keyOrPattern,
-        durationMs: Math.max(1, Math.round(entry.durationMicroseconds / 1000)),
-        status: 'success' as const,
-        details: {
-          slowlogId: entry.id,
-          command: entry.command,
-          args: entry.arguments,
-          durationMicroseconds: entry.durationMicroseconds,
-        },
-      }))
-      const nextCursor =
-        parsedEntries.length > 0
-          ? String(parsedEntries[parsedEntries.length - 1].id)
-          : args.cursor
+			const events = parsedEntries.map((entry) => ({
+				timestamp: new Date(entry.startedAtSeconds * 1000).toISOString(),
+				connectionId: profile.id,
+				environment: profile.environment,
+				action: `redis.slowlog.${entry.command.toLowerCase()}`,
+				keyOrPattern: entry.keyOrPattern,
+				durationMs: Math.max(1, Math.round(entry.durationMicroseconds / 1000)),
+				status: 'success' as const,
+				details: {
+					slowlogId: entry.id,
+					command: entry.command,
+					args: entry.arguments,
+					durationMicroseconds: entry.durationMicroseconds,
+				},
+			}))
+			const nextCursor =
+				parsedEntries.length > 0
+					? String(parsedEntries[parsedEntries.length - 1].id)
+					: args.cursor
 
-      return {
-        events,
-        nextCursor,
-      }
-    } catch (error) {
-      throw this.toConnectionFailure(error)
-    } finally {
-      await this.disconnectRedisClient(client)
-    }
-  }
+			return {
+				events,
+				nextCursor,
+			}
+		} catch (error) {
+			throw this.toConnectionFailure(error)
+		} finally {
+			await this.disconnectRedisClient(client)
+		}
+	}
 
-  private async testRedisConnection(
-    profile: EngineConnection,
-    secret: ConnectionSecret,
-  ): Promise<ConnectionTestResult> {
-    const client = this.createRedisClient(profile, secret)
-    const startedAt = Date.now()
+	private async testRedisConnection(
+		profile: EngineConnection,
+		secret: ConnectionSecret,
+	): Promise<ConnectionTestResult> {
+		const client = this.createRedisClient(profile, secret)
+		const startedAt = Date.now()
 
-    try {
-      await client.connect()
-      await client.ping()
+		try {
+			await client.connect()
+			await client.ping()
 
-      return {
-        latencyMs: Date.now() - startedAt,
-        capabilities: REDIS_CAPABILITIES,
-      }
-    } catch (error) {
-      throw this.toConnectionFailure(error)
-    } finally {
-      await this.disconnectRedisClient(client)
-    }
-  }
+			return {
+				latencyMs: Date.now() - startedAt,
+				capabilities: REDIS_CAPABILITIES,
+			}
+		} catch (error) {
+			throw this.toConnectionFailure(error)
+		} finally {
+			await this.disconnectRedisClient(client)
+		}
+	}
 
-  private async testMemcachedConnection(
-    profile: EngineConnection,
-    secret: ConnectionSecret,
-  ): Promise<ConnectionTestResult> {
-    const client = this.createMemcachedClient(profile, secret)
-    const startedAt = Date.now()
+	private async testMemcachedConnection(
+		profile: EngineConnection,
+		secret: ConnectionSecret,
+	): Promise<ConnectionTestResult> {
+		const client = this.createMemcachedClient(profile, secret)
+		const startedAt = Date.now()
 
-    try {
-      await client.get('__cachify_healthcheck__')
+		try {
+			await client.get('__speichr_healthcheck__')
 
-      return {
-        latencyMs: Date.now() - startedAt,
-        capabilities: MEMCACHED_CAPABILITIES,
-      }
-    } catch (error) {
-      throw this.toConnectionFailure(error)
-    } finally {
-      client.quit()
-    }
-  }
+			return {
+				latencyMs: Date.now() - startedAt,
+				capabilities: MEMCACHED_CAPABILITIES,
+			}
+		} catch (error) {
+			throw this.toConnectionFailure(error)
+		} finally {
+			client.quit()
+		}
+	}
 
-  private async redisListKeys(
-    profile: ConnectionProfile,
-    secret: ConnectionSecret,
-    args: { cursor?: string; limit: number },
-  ): Promise<KeyListResult> {
-    const client = this.createRedisClient(profile, secret)
+	private async redisListKeys(
+		profile: ConnectionProfile,
+		secret: ConnectionSecret,
+		args: { cursor?: string; limit: number },
+	): Promise<KeyListResult> {
+		const client = this.createRedisClient(profile, secret)
 
-    try {
-      await client.connect()
+		try {
+			await client.connect()
 
-      const scanResult = await client.scan(args.cursor ?? '0', {
-        MATCH: '*',
-        COUNT: args.limit,
-      })
-      const nextCursor = toRedisText(scanResult.cursor)
+			const scanResult = await client.scan(args.cursor ?? '0', {
+				MATCH: '*',
+				COUNT: args.limit,
+			})
+			const nextCursor = toRedisText(scanResult.cursor)
 
-      return {
-        keys: scanResult.keys.map(toRedisText),
-        nextCursor: nextCursor === '0' ? undefined : nextCursor,
-      }
-    } catch (error) {
-      throw this.toConnectionFailure(error)
-    } finally {
-      await this.disconnectRedisClient(client)
-    }
-  }
+			return {
+				keys: scanResult.keys.map(toRedisText),
+				nextCursor: nextCursor === '0' ? undefined : nextCursor,
+			}
+		} catch (error) {
+			throw this.toConnectionFailure(error)
+		} finally {
+			await this.disconnectRedisClient(client)
+		}
+	}
 
-  private async redisSearchKeys(
-    profile: ConnectionProfile,
-    secret: ConnectionSecret,
-    args: { pattern: string; limit: number; cursor?: string },
-  ): Promise<KeyListResult> {
-    const client = this.createRedisClient(profile, secret)
-    const keySet = new Set<string>()
+	private async redisSearchKeys(
+		profile: ConnectionProfile,
+		secret: ConnectionSecret,
+		args: { pattern: string; limit: number; cursor?: string },
+	): Promise<KeyListResult> {
+		const client = this.createRedisClient(profile, secret)
+		const keySet = new Set<string>()
 
-    try {
-      await client.connect()
+		try {
+			await client.connect()
 
-      let cursor = args.cursor ?? '0'
-      let loopCount = 0
+			let cursor = args.cursor ?? '0'
+			let loopCount = 0
 
-      do {
-        const scanResult = await client.scan(cursor, {
-          MATCH: args.pattern,
-          COUNT: Math.min(500, Math.max(args.limit, 50)),
-        })
+			do {
+				const scanResult = await client.scan(cursor, {
+					MATCH: args.pattern,
+					COUNT: Math.min(500, Math.max(args.limit, 50)),
+				})
 
-        scanResult.keys.forEach((key) => keySet.add(toRedisText(key)))
+				scanResult.keys.forEach((key) => keySet.add(toRedisText(key)))
 
-        cursor = toRedisText(scanResult.cursor)
-        loopCount += 1
-      } while (
-        cursor !== '0' &&
-        keySet.size < args.limit &&
-        loopCount < MAX_SCAN_LOOP
-      )
+				cursor = toRedisText(scanResult.cursor)
+				loopCount += 1
+			} while (
+				cursor !== '0' &&
+				keySet.size < args.limit &&
+				loopCount < MAX_SCAN_LOOP
+			)
 
-      return {
-        keys: Array.from(keySet).slice(0, args.limit),
-        nextCursor: cursor === '0' ? undefined : cursor,
-      }
-    } catch (error) {
-      throw this.toConnectionFailure(error)
-    } finally {
-      await this.disconnectRedisClient(client)
-    }
-  }
+			return {
+				keys: Array.from(keySet).slice(0, args.limit),
+				nextCursor: cursor === '0' ? undefined : cursor,
+			}
+		} catch (error) {
+			throw this.toConnectionFailure(error)
+		} finally {
+			await this.disconnectRedisClient(client)
+		}
+	}
 
-  private async redisGetValue(
-    profile: ConnectionProfile,
-    secret: ConnectionSecret,
-    key: string,
-  ): Promise<KeyValueRecord> {
-    const client = this.createRedisClient(profile, secret)
+	private async redisGetValue(
+		profile: ConnectionProfile,
+		secret: ConnectionSecret,
+		key: string,
+	): Promise<KeyValueRecord> {
+		const client = this.createRedisClient(profile, secret)
 
-    try {
-      await client.connect()
+		try {
+			await client.connect()
 
-      const [value, ttl] = await Promise.all([client.get(key), client.ttl(key)])
-      const ttlNumber = Number(ttl)
+			const [value, ttl] = await Promise.all([client.get(key), client.ttl(key)])
+			const ttlNumber = Number(ttl)
 
-      return {
-        key,
-        value: value === null ? null : toRedisText(value),
-        ttlSeconds: Number.isFinite(ttlNumber) && ttlNumber >= 0 ? ttlNumber : null,
-        supportsTTL: true,
-      }
-    } catch (error) {
-      throw this.toConnectionFailure(error)
-    } finally {
-      await this.disconnectRedisClient(client)
-    }
-  }
+			return {
+				key,
+				value: value === null ? null : toRedisText(value),
+				ttlSeconds: Number.isFinite(ttlNumber) && ttlNumber >= 0 ? ttlNumber : null,
+				supportsTTL: true,
+			}
+		} catch (error) {
+			throw this.toConnectionFailure(error)
+		} finally {
+			await this.disconnectRedisClient(client)
+		}
+	}
 
-  private async redisSetValue(
-    profile: ConnectionProfile,
-    secret: ConnectionSecret,
-    args: { key: string; value: string; ttlSeconds?: number },
-  ): Promise<void> {
-    const client = this.createRedisClient(profile, secret)
+	private async redisSetValue(
+		profile: ConnectionProfile,
+		secret: ConnectionSecret,
+		args: { key: string; value: string; ttlSeconds?: number },
+	): Promise<void> {
+		const client = this.createRedisClient(profile, secret)
 
-    try {
-      await client.connect()
-      if (typeof args.ttlSeconds === 'number') {
-        await client.set(args.key, args.value, {
-          EX: args.ttlSeconds,
-        })
-      } else {
-        await client.set(args.key, args.value)
-      }
-    } catch (error) {
-      throw this.toConnectionFailure(error)
-    } finally {
-      await this.disconnectRedisClient(client)
-    }
-  }
+		try {
+			await client.connect()
+			if (typeof args.ttlSeconds === 'number') {
+				await client.set(args.key, args.value, {
+					EX: args.ttlSeconds,
+				})
+			} else {
+				await client.set(args.key, args.value)
+			}
+		} catch (error) {
+			throw this.toConnectionFailure(error)
+		} finally {
+			await this.disconnectRedisClient(client)
+		}
+	}
 
-  private async redisDeleteKey(
-    profile: ConnectionProfile,
-    secret: ConnectionSecret,
-    key: string,
-  ): Promise<void> {
-    const client = this.createRedisClient(profile, secret)
+	private async redisDeleteKey(
+		profile: ConnectionProfile,
+		secret: ConnectionSecret,
+		key: string,
+	): Promise<void> {
+		const client = this.createRedisClient(profile, secret)
 
-    try {
-      await client.connect()
-      await client.del(key)
-    } catch (error) {
-      throw this.toConnectionFailure(error)
-    } finally {
-      await this.disconnectRedisClient(client)
-    }
-  }
+		try {
+			await client.connect()
+			await client.del(key)
+		} catch (error) {
+			throw this.toConnectionFailure(error)
+		} finally {
+			await this.disconnectRedisClient(client)
+		}
+	}
 
-  private createRedisClient(
-    profile: EngineConnection,
-    secret: ConnectionSecret,
-  ): RedisClientType {
-    const socketBase = {
-      host: profile.host,
-      port: profile.port,
-      connectTimeout: profile.timeoutMs,
-    }
+	private createRedisClient(
+		profile: EngineConnection,
+		secret: ConnectionSecret,
+	): RedisClientType {
+		const socketBase = {
+			host: profile.host,
+			port: profile.port,
+			connectTimeout: profile.timeoutMs,
+		}
 
-    const socket = profile.tlsEnabled
-      ? {
-          ...socketBase,
-          tls: true as const,
-        }
-      : socketBase
+		const socket = profile.tlsEnabled
+			? {
+					...socketBase,
+					tls: true as const,
+				}
+			: socketBase
 
-    return createClient({
-      socket,
-      database: profile.dbIndex,
-      username: secret.username,
-      password: secret.password,
-    })
-  }
+		return createClient({
+			socket,
+			database: profile.dbIndex,
+			username: secret.username,
+			password: secret.password,
+		})
+	}
 
-  private createMemcachedClient(
-    profile: EngineConnection,
-    secret: ConnectionSecret,
-  ) {
-    return MemjsClient.create(`${profile.host}:${profile.port}`, {
-      username: secret.username,
-      password: secret.password,
-      timeout: Math.max(0.1, profile.timeoutMs / 1000),
-      conntimeout: Math.max(0.2, (profile.timeoutMs * 2) / 1000),
-    })
-  }
+	private createMemcachedClient(
+		profile: EngineConnection,
+		secret: ConnectionSecret,
+	) {
+		return MemjsClient.create(`${profile.host}:${profile.port}`, {
+			username: secret.username,
+			password: secret.password,
+			timeout: Math.max(0.1, profile.timeoutMs / 1000),
+			conntimeout: Math.max(0.2, (profile.timeoutMs * 2) / 1000),
+		})
+	}
 
-  private toConnectionFailure(cause: unknown): OperationFailure {
-    const message =
-      cause instanceof Error
-        ? cause.message
-        : 'Connection operation failed unexpectedly.'
+	private toConnectionFailure(cause: unknown): OperationFailure {
+		const message =
+			cause instanceof Error
+				? cause.message
+				: 'Connection operation failed unexpectedly.'
 
-    return new OperationFailure('CONNECTION_FAILED', message, true)
-  }
+		return new OperationFailure('CONNECTION_FAILED', message, true)
+	}
 
-  private async disconnectRedisClient(client: RedisClientType): Promise<void> {
-    if (!client.isOpen) {
-      return
-    }
+	private async disconnectRedisClient(client: RedisClientType): Promise<void> {
+		if (!client.isOpen) {
+			return
+		}
 
-    await client.disconnect().catch((error: unknown): void => {
-      void error
-    })
-  }
+		await client.disconnect().catch((error: unknown): void => {
+			void error
+		})
+	}
 }
 
 const toRedisText = (value: unknown): string => {
-  if (typeof value === 'string') {
-    return value
-  }
+	if (typeof value === 'string') {
+		return value
+	}
 
-  if (Buffer.isBuffer(value)) {
-    return value.toString('utf8')
-  }
+	if (Buffer.isBuffer(value)) {
+		return value.toString('utf8')
+	}
 
-  return String(value)
+	return String(value)
 }
 
 type RedisSlowLogEntry = {
-  id: number
-  startedAtSeconds: number
-  durationMicroseconds: number
-  command: string
-  keyOrPattern: string
-  arguments: string[]
+	id: number
+	startedAtSeconds: number
+	durationMicroseconds: number
+	command: string
+	keyOrPattern: string
+	arguments: string[]
 }
 
 const parseRedisSlowLogEntry = (entry: unknown): RedisSlowLogEntry | null => {
-  if (!Array.isArray(entry) || entry.length < 4) {
-    return null
-  }
+	if (!Array.isArray(entry) || entry.length < 4) {
+		return null
+	}
 
-  const id = Number(entry[0])
-  const startedAtSeconds = Number(entry[1])
-  const durationMicroseconds = Number(entry[2])
-  if (
-    !Number.isFinite(id) ||
-    !Number.isFinite(startedAtSeconds) ||
-    !Number.isFinite(durationMicroseconds)
-  ) {
-    return null
-  }
+	const id = Number(entry[0])
+	const startedAtSeconds = Number(entry[1])
+	const durationMicroseconds = Number(entry[2])
+	if (
+		!Number.isFinite(id) ||
+		!Number.isFinite(startedAtSeconds) ||
+		!Number.isFinite(durationMicroseconds)
+	) {
+		return null
+	}
 
-  const rawCommand = entry[3]
-  const commandTokens = Array.isArray(rawCommand)
-    ? rawCommand.map((token) => toRedisText(token))
-    : [toRedisText(rawCommand)]
+	const rawCommand = entry[3]
+	const commandTokens = Array.isArray(rawCommand)
+		? rawCommand.map((token) => toRedisText(token))
+		: [toRedisText(rawCommand)]
 
-  if (commandTokens.length === 0) {
-    return null
-  }
+	if (commandTokens.length === 0) {
+		return null
+	}
 
-  const command = commandTokens[0].trim().toUpperCase() || 'UNKNOWN'
-  const commandArguments = commandTokens.slice(1)
-  const keyOrPattern = commandArguments[0] ?? command
+	const command = commandTokens[0].trim().toUpperCase() || 'UNKNOWN'
+	const commandArguments = commandTokens.slice(1)
+	const keyOrPattern = commandArguments[0] ?? command
 
-  return {
-    id: Math.trunc(id),
-    startedAtSeconds: Math.trunc(startedAtSeconds),
-    durationMicroseconds: Math.max(0, Math.trunc(durationMicroseconds)),
-    command,
-    keyOrPattern,
-    arguments: commandArguments,
-  }
+	return {
+		id: Math.trunc(id),
+		startedAtSeconds: Math.trunc(startedAtSeconds),
+		durationMicroseconds: Math.max(0, Math.trunc(durationMicroseconds)),
+		command,
+		keyOrPattern,
+		arguments: commandArguments,
+	}
 }

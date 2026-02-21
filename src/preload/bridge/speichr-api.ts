@@ -1,0 +1,121 @@
+import { ipcRenderer } from 'electron'
+
+import type { SpeichrApi } from '../../shared/contracts/api'
+import type {
+	CommandPayloadMap,
+	CommandResultMap,
+	IpcResponseEnvelope,
+	QueryPayloadMap,
+	QueryResultMap,
+} from '../../shared/ipc/contracts'
+import {
+	IPC_COMMAND_CHANNEL,
+	IPC_QUERY_CHANNEL,
+} from '../../shared/ipc/contracts'
+import { commandEnvelopeSchema, queryEnvelopeSchema } from '../schemas/ipc'
+
+const createCorrelationId = (): string => {
+	if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+		return crypto.randomUUID()
+	}
+
+	return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+const invokeCommand = async <TCommand extends keyof CommandPayloadMap>(
+	command: TCommand,
+	payload: CommandPayloadMap[TCommand],
+): Promise<IpcResponseEnvelope<CommandResultMap[TCommand]>> => {
+	const envelope = commandEnvelopeSchema.parse({
+		command,
+		payload,
+		correlationId: createCorrelationId(),
+	})
+
+	return ipcRenderer.invoke(IPC_COMMAND_CHANNEL, envelope)
+}
+
+const invokeQuery = async <TQuery extends keyof QueryPayloadMap>(
+	query: TQuery,
+	payload: QueryPayloadMap[TQuery],
+): Promise<IpcResponseEnvelope<QueryResultMap[TQuery]>> => {
+	const envelope = queryEnvelopeSchema.parse({
+		query,
+		payload,
+		correlationId: createCorrelationId(),
+	})
+
+	return ipcRenderer.invoke(IPC_QUERY_CHANNEL, envelope)
+}
+
+export const speichrApi: SpeichrApi = {
+	listConnections: () => invokeQuery('connection.list', {}),
+	getConnection: (payload) => invokeQuery('connection.get', payload),
+	createConnection: (payload) => invokeCommand('connection.create', payload),
+	updateConnection: (payload) => invokeCommand('connection.update', payload),
+	deleteConnection: (payload) => invokeCommand('connection.delete', payload),
+	testConnection: (payload) => invokeCommand('connection.test', payload),
+	getCapabilities: (payload) => invokeQuery('provider.capabilities', payload),
+	listKeys: (payload) => invokeQuery('key.list', payload),
+	searchKeys: (payload) => invokeQuery('key.search', payload),
+	getKey: (payload) => invokeQuery('key.get', payload),
+	setKey: (payload) => invokeCommand('key.set', payload),
+	deleteKey: (payload) => invokeCommand('key.delete', payload),
+	listSnapshots: (payload) => invokeQuery('snapshot.list', payload),
+	restoreSnapshot: (payload) => invokeCommand('rollback.restore', payload),
+	listWorkflowTemplates: () => invokeQuery('workflow.template.list', {}),
+	createWorkflowTemplate: (payload) =>
+		invokeCommand('workflow.template.create', payload),
+	updateWorkflowTemplate: (payload) =>
+		invokeCommand('workflow.template.update', payload),
+	deleteWorkflowTemplate: (payload) =>
+		invokeCommand('workflow.template.delete', payload),
+	previewWorkflow: (payload) => invokeQuery('workflow.preview', payload),
+	executeWorkflow: (payload) => invokeCommand('workflow.execute', payload),
+	rerunWorkflow: (payload) => invokeCommand('workflow.rerun', payload),
+	resumeWorkflow: (payload) => invokeCommand('workflow.resume', payload),
+	listWorkflowExecutions: (payload) =>
+		invokeQuery('workflow.execution.list', payload),
+	getWorkflowExecution: (payload) =>
+		invokeQuery('workflow.execution.get', payload),
+	listHistory: (payload) => invokeQuery('history.list', payload),
+	getObservabilityDashboard: (payload) =>
+		invokeQuery('observability.dashboard', payload),
+	getKeyspaceActivity: (payload) =>
+		invokeQuery('observability.keyspaceActivity', payload),
+	getFailedOperationDrilldown: (payload) =>
+		invokeQuery('observability.failedOperations', payload),
+	comparePeriods: (payload) =>
+		invokeQuery('observability.comparePeriods', payload),
+	previewIncidentBundle: (payload) =>
+		invokeQuery('incident.bundle.preview', payload),
+	listIncidentBundles: (payload) => invokeQuery('incident.bundle.list', payload),
+	exportIncidentBundle: (payload) =>
+		invokeCommand('incident.bundle.export', payload),
+	startIncidentBundleExport: (payload) =>
+		invokeCommand('incident.bundle.export.start', payload),
+	cancelIncidentBundleExportJob: (payload) =>
+		invokeCommand('incident.bundle.export.cancel', payload),
+	resumeIncidentBundleExportJob: (payload) =>
+		invokeCommand('incident.bundle.export.resume', payload),
+	getIncidentBundleExportJob: (payload) =>
+		invokeQuery('incident.bundle.export.job.get', payload),
+	listAlerts: (payload) => invokeQuery('alert.list', payload),
+	markAlertRead: (payload) => invokeCommand('alert.markRead', payload),
+	listAlertRules: () => invokeQuery('alert.rule.list', {}),
+	createAlertRule: (payload) => invokeCommand('alert.rule.create', payload),
+	updateAlertRule: (payload) => invokeCommand('alert.rule.update', payload),
+	deleteAlertRule: (payload) => invokeCommand('alert.rule.delete', payload),
+	listPolicyPacks: () => invokeQuery('policy.pack.list', {}),
+	createPolicyPack: (payload) => invokeCommand('policy.pack.create', payload),
+	updatePolicyPack: (payload) => invokeCommand('policy.pack.update', payload),
+	deletePolicyPack: (payload) => invokeCommand('policy.pack.delete', payload),
+	assignPolicyPack: (payload) => invokeCommand('policy.pack.assign', payload),
+	listPolicyPackAssignments: (payload) =>
+		invokeQuery('policy.pack.assignment.list', payload),
+	listRetentionPolicies: () => invokeQuery('retention.policy.list', {}),
+	updateRetentionPolicy: (payload) =>
+		invokeCommand('retention.policy.update', payload),
+	purgeRetentionData: (payload) => invokeCommand('retention.purge', payload),
+	getStorageSummary: () => invokeQuery('storage.summary', {}),
+}

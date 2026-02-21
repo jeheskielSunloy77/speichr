@@ -17,6 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Initial stable desktop release for Cachify Studio.
+- Initial stable desktop release for Speichr.
 - Multi-platform release packaging for Windows, macOS, and Linux.
 - Release workflow with CI validation gates and checksum publishing.

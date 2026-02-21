@@ -1,6 +1,6 @@
 {
-	"name": "cachify-studio",
-	"productName": "Cachify Studio",
+	"name": "speichr",
+	"productName": "Speichr",
 	"version": "1.0.1",
 	"description": "Desktop operations studio for managing cache connections, workflows, observability, and incident exports.",
 	"main": ".vite/build/main.js",
@@ -16,7 +16,7 @@
 		"check:migrations": "bun run scripts/ci/check-migration-integrity.ts",
 		"check:release:readiness": "bun run scripts/ci/check-release-readiness.ts",
 		"test": "bun run test:unit && bun run test:contract",
-		"test:unit": "vitest run src/main/application/cachify-service.test.ts src/main/policies/read-only-policy.test.ts",
+		"test:unit": "vitest run src/main/application/speichr-service.test.ts src/main/policies/read-only-policy.test.ts",
 		"test:contract": "vitest run src/shared/schemas/ipc.test.ts src/renderer/features/common/ipc.test.ts",
 		"test:provider": "vitest run src/main/infrastructure/providers/cache-gateway.test.ts src/main/infrastructure/providers/provider-engine-event-ingestor.test.ts",
 		"test:migration": "vitest run src/main/persistence/sqlite.test.ts",
@@ -37,11 +37,11 @@
 	],
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/jeheskielSunloy77/cachify-studio.git"
+		"url": "https://github.com/jeheskielSunloy77/speichr.git"
 	},
-	"homepage": "https://github.com/jeheskielSunloy77/cachify-studio#readme",
+	"homepage": "https://github.com/jeheskielSunloy77/speichr#readme",
 	"bugs": {
-		"url": "https://github.com/jeheskielSunloy77/cachify-studio/issues"
+		"url": "https://github.com/jeheskielSunloy77/speichr/issues"
 	},
 	"author": {
 		"name": "jeheskielSunloy77",

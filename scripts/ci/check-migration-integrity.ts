@@ -7,74 +7,77 @@ import BetterSqlite3 from 'better-sqlite3'
 import { createSqliteDatabase } from '../../src/main/persistence/sqlite'
 
 const REQUIRED_TABLES = [
-  'connection_profiles',
-  'memcached_key_index',
-  'key_snapshots',
-  'workflow_templates',
-  'workflow_executions',
-  'history_events',
-  'observability_snapshots',
-  'alert_events',
-  'alert_rules',
-  'governance_policy_packs',
-  'governance_assignments',
-  'incident_bundles',
-  'retention_policies',
+	'connection_profiles',
+	'memcached_key_index',
+	'key_snapshots',
+	'workflow_templates',
+	'workflow_executions',
+	'history_events',
+	'observability_snapshots',
+	'alert_events',
+	'alert_rules',
+	'governance_policy_packs',
+	'governance_assignments',
+	'incident_bundles',
+	'retention_policies',
 ]
 
 const REQUIRED_CONNECTION_COLUMNS = [
-  'force_read_only',
-  'retry_max_attempts',
-  'retry_backoff_ms',
-  'retry_backoff_strategy',
-  'retry_abort_on_error_rate',
+	'force_read_only',
+	'retry_max_attempts',
+	'retry_backoff_ms',
+	'retry_backoff_strategy',
+	'retry_abort_on_error_rate',
 ]
 
 const REQUIRED_WORKFLOW_EXECUTION_COLUMNS = [
-  'checkpoint_token',
-  'policy_pack_id',
-  'schedule_window_id',
-  'resumed_from_execution_id',
+	'checkpoint_token',
+	'policy_pack_id',
+	'schedule_window_id',
+	'resumed_from_execution_id',
 ]
 
 const assert = (condition: unknown, message: string): void => {
-  if (!condition) {
-    throw new Error(message)
-  }
+	if (!condition) {
+		throw new Error(message)
+	}
 }
 
 const isAbiMismatch = (error: unknown): boolean => {
-  if (!(error instanceof Error)) {
-    return false
-  }
+	if (!(error instanceof Error)) {
+		return false
+	}
 
-  return error.message.includes('NODE_MODULE_VERSION')
+	return error.message.includes('NODE_MODULE_VERSION')
 }
 
-const tableExists = (db: BetterSqlite3.Database, tableName: string): boolean => {
-  const row = db
-    .prepare(
-      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1`,
-    )
-    .get(tableName) as { name: string } | undefined
+const tableExists = (
+	db: BetterSqlite3.Database,
+	tableName: string,
+): boolean => {
+	const row = db
+		.prepare(
+			`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1`,
+		)
+		.get(tableName) as { name: string } | undefined
 
-  return Boolean(row?.name)
+	return Boolean(row?.name)
 }
 
 const getColumnNames = (
-  db: BetterSqlite3.Database,
-  tableName: string,
+	db: BetterSqlite3.Database,
+	tableName: string,
 ): Set<string> => {
-  const rows = db
-    .prepare(`PRAGMA table_info(${tableName})`)
-    .all() as Array<{ name: string }>
+	const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{
+		name: string
+	}>
 
-  return new Set(rows.map((row) => row.name))
+	return new Set(rows.map((row) => row.name))
 }
 
 const createLegacySchema = (dbPath: string): void => {
-  const db = new BetterSqlite3(dbPath)
-  db.exec(`
+	const db = new BetterSqlite3(dbPath)
+	db.exec(`
     CREATE TABLE connection_profiles (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -99,74 +102,74 @@ const createLegacySchema = (dbPath: string): void => {
       PRIMARY KEY (connection_id, cache_key)
     );
   `)
-  db.close()
+	db.close()
 }
 
 const tempDirectory = fs.mkdtempSync(
-  path.join(os.tmpdir(), 'cachify-migration-check-'),
+	path.join(os.tmpdir(), 'speichr-migration-check-'),
 )
 
 try {
-  try {
-    const freshPath = path.join(tempDirectory, 'fresh.db')
-    const freshDb = createSqliteDatabase(freshPath)
+	try {
+		const freshPath = path.join(tempDirectory, 'fresh.db')
+		const freshDb = createSqliteDatabase(freshPath)
 
-    for (const tableName of REQUIRED_TABLES) {
-      assert(
-        tableExists(freshDb, tableName),
-        `Missing required table after fresh migration: ${tableName}`,
-      )
-    }
+		for (const tableName of REQUIRED_TABLES) {
+			assert(
+				tableExists(freshDb, tableName),
+				`Missing required table after fresh migration: ${tableName}`,
+			)
+		}
 
-    const freshColumns = getColumnNames(freshDb, 'connection_profiles')
-    for (const columnName of REQUIRED_CONNECTION_COLUMNS) {
-      assert(
-        freshColumns.has(columnName),
-        `Missing required connection_profiles column in fresh schema: ${columnName}`,
-      )
-    }
-    const workflowColumns = getColumnNames(freshDb, 'workflow_executions')
-    for (const columnName of REQUIRED_WORKFLOW_EXECUTION_COLUMNS) {
-      assert(
-        workflowColumns.has(columnName),
-        `Missing required workflow_executions column in fresh schema: ${columnName}`,
-      )
-    }
-    freshDb.close()
+		const freshColumns = getColumnNames(freshDb, 'connection_profiles')
+		for (const columnName of REQUIRED_CONNECTION_COLUMNS) {
+			assert(
+				freshColumns.has(columnName),
+				`Missing required connection_profiles column in fresh schema: ${columnName}`,
+			)
+		}
+		const workflowColumns = getColumnNames(freshDb, 'workflow_executions')
+		for (const columnName of REQUIRED_WORKFLOW_EXECUTION_COLUMNS) {
+			assert(
+				workflowColumns.has(columnName),
+				`Missing required workflow_executions column in fresh schema: ${columnName}`,
+			)
+		}
+		freshDb.close()
 
-    const legacyPath = path.join(tempDirectory, 'legacy.db')
-    createLegacySchema(legacyPath)
+		const legacyPath = path.join(tempDirectory, 'legacy.db')
+		createLegacySchema(legacyPath)
 
-    const upgradedDb = createSqliteDatabase(legacyPath)
-    const upgradedColumns = getColumnNames(upgradedDb, 'connection_profiles')
-    for (const columnName of REQUIRED_CONNECTION_COLUMNS) {
-      assert(
-        upgradedColumns.has(columnName),
-        `Legacy upgrade did not add column: ${columnName}`,
-      )
-    }
-    const upgradedWorkflowColumns = getColumnNames(
-      upgradedDb,
-      'workflow_executions',
-    )
-    for (const columnName of REQUIRED_WORKFLOW_EXECUTION_COLUMNS) {
-      assert(
-        upgradedWorkflowColumns.has(columnName),
-        `Legacy upgrade did not add workflow_executions column: ${columnName}`,
-      )
-    }
-    upgradedDb.close()
+		const upgradedDb = createSqliteDatabase(legacyPath)
+		const upgradedColumns = getColumnNames(upgradedDb, 'connection_profiles')
+		for (const columnName of REQUIRED_CONNECTION_COLUMNS) {
+			assert(
+				upgradedColumns.has(columnName),
+				`Legacy upgrade did not add column: ${columnName}`,
+			)
+		}
+		const upgradedWorkflowColumns = getColumnNames(
+			upgradedDb,
+			'workflow_executions',
+		)
+		for (const columnName of REQUIRED_WORKFLOW_EXECUTION_COLUMNS) {
+			assert(
+				upgradedWorkflowColumns.has(columnName),
+				`Legacy upgrade did not add workflow_executions column: ${columnName}`,
+			)
+		}
+		upgradedDb.close()
 
-    console.log('Migration integrity checks passed.')
-  } catch (error) {
-    if (isAbiMismatch(error)) {
-      console.warn(
-        'Migration integrity check skipped: better-sqlite3 native module ABI mismatch.',
-      )
-    } else {
-      throw error
-    }
-  }
+		console.log('Migration integrity checks passed.')
+	} catch (error) {
+		if (isAbiMismatch(error)) {
+			console.warn(
+				'Migration integrity check skipped: better-sqlite3 native module ABI mismatch.',
+			)
+		} else {
+			throw error
+		}
+	}
 } finally {
-  fs.rmSync(tempDirectory, { recursive: true, force: true })
+	fs.rmSync(tempDirectory, { recursive: true, force: true })
 }

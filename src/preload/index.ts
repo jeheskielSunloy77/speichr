@@ -1,5 +1,5 @@
 import { contextBridge } from 'electron'
 
-import { cachifyApi } from './bridge/cachify-api'
+import { speichrApi } from './bridge/speichr-api'
 
-contextBridge.exposeInMainWorld('cachify', cachifyApi)
+contextBridge.exposeInMainWorld('speichr', speichrApi)
