@@ -1,7 +1,7 @@
 {
 	"name": "speichr",
 	"productName": "Speichr",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"description": "Desktop operations studio for managing cache connections, workflows, observability, and incident exports.",
 	"main": ".vite/build/main.js",
 	"private": true,
