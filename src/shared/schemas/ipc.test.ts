@@ -204,6 +204,20 @@ describe('queryEnvelopeSchema', () => {
     expect((parsed.payload as { cursor?: string }).cursor).toBe('42')
   })
 
+  it('accepts key count queries with optional pattern', () => {
+    const parsed = queryEnvelopeSchema.parse({
+      query: 'key.count',
+      correlationId: 'xyz-2b',
+      payload: {
+        connectionId: 'conn-1',
+        pattern: 'user:*',
+      },
+    })
+
+    expect(parsed.query).toBe('key.count')
+    expect((parsed.payload as { pattern?: string }).pattern).toBe('user:*')
+  })
+
   it('accepts workflow preview queries', () => {
     const parsed = queryEnvelopeSchema.parse({
       query: 'workflow.preview',

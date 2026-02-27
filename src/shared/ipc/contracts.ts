@@ -44,6 +44,8 @@ import type {
 	IncidentBundlePreview,
 	IncidentBundlePreviewRequest,
 	IncidentExportJob,
+	KeyCountRequest,
+	KeyCountResult,
 	KeyDeleteRequest,
 	KeyGetRequest,
 	KeyListRequest,
@@ -124,6 +126,7 @@ export type SpeichrQuery =
 	| 'provider.capabilities'
 	| 'key.list'
 	| 'key.search'
+	| 'key.count'
 	| 'key.get'
 	| 'snapshot.list'
 	| 'workflow.template.list'
@@ -187,6 +190,7 @@ export interface QueryPayloadMap {
 	'provider.capabilities': ConnectionCapabilitiesRequest
 	'key.list': KeyListRequest
 	'key.search': KeySearchRequest
+	'key.count': KeyCountRequest
 	'key.get': KeyGetRequest
 	'snapshot.list': SnapshotListRequest
 	'workflow.template.list': Record<string, never>
@@ -251,6 +255,7 @@ export interface QueryResultMap {
 	'provider.capabilities': ProviderCapabilities
 	'key.list': KeyListResult
 	'key.search': KeyListResult
+	'key.count': KeyCountResult
 	'key.get': KeyValueRecord
 	'snapshot.list': SnapshotRecord[]
 	'workflow.template.list': WorkflowTemplate[]

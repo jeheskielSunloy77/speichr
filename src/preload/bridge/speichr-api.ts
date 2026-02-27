@@ -62,6 +62,7 @@ export const speichrApi: SpeichrApi = {
 	getCapabilities: (payload) => invokeQuery('provider.capabilities', payload),
 	listKeys: (payload) => invokeQuery('key.list', payload),
 	searchKeys: (payload) => invokeQuery('key.search', payload),
+	countKeys: (payload) => invokeQuery('key.count', payload),
 	getKey: (payload) => invokeQuery('key.get', payload),
 	setKey: (payload) => invokeCommand('key.set', payload),
 	deleteKey: (payload) => invokeCommand('key.delete', payload),

@@ -13,6 +13,7 @@ import type {
   HistoryEvent,
   HistoryQueryRequest,
   IncidentBundle,
+  KeyCountResult,
   KeyListResult,
   KeyValueRecord,
   ObservabilitySnapshot,
@@ -50,12 +51,14 @@ export interface SecretStore {
 
 export interface MemcachedKeyIndexRepository {
   listKeys: (connectionId: string, limit: number) => Promise<string[]>
+  countKeys: (connectionId: string) => Promise<number>
   searchKeys: (
     connectionId: string,
     pattern: string,
     limit: number,
     cursor?: string,
   ) => Promise<string[]>
+  countKeysByPattern: (connectionId: string, pattern: string) => Promise<number>
   upsertKey: (connectionId: string, key: string) => Promise<void>
   removeKey: (connectionId: string, key: string) => Promise<void>
   deleteByConnectionId: (connectionId: string) => Promise<void>
@@ -185,6 +188,15 @@ export interface CacheGateway {
     secret: ConnectionSecret,
     args: { pattern: string; limit: number; cursor?: string },
   ) => Promise<KeyListResult>
+  countKeys: (
+    profile: ConnectionProfile,
+    secret: ConnectionSecret,
+  ) => Promise<KeyCountResult>
+  countKeysByPattern: (
+    profile: ConnectionProfile,
+    secret: ConnectionSecret,
+    args: { pattern: string },
+  ) => Promise<KeyCountResult>
   getValue: (
     profile: ConnectionProfile,
     secret: ConnectionSecret,

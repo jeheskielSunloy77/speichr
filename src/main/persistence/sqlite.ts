@@ -746,9 +746,19 @@ export class SqliteMemcachedKeyIndexRepository
     { cache_key: string }
   >
 
+  private readonly countStatement: BetterSqlite3.Statement<
+    [string],
+    { total: number }
+  >
+
   private readonly searchStatement: BetterSqlite3.Statement<
     [string, string, string | null, string | null, number],
     { cache_key: string }
+  >
+
+  private readonly countByPatternStatement: BetterSqlite3.Statement<
+    [string, string],
+    { total: number }
   >
 
   private readonly upsertStatement: BetterSqlite3.Statement<
@@ -770,6 +780,12 @@ export class SqliteMemcachedKeyIndexRepository
       LIMIT ?
     `)
 
+    this.countStatement = this.db.prepare<[string], { total: number }>(`
+      SELECT COUNT(*) AS total
+      FROM memcached_key_index
+      WHERE connection_id = ?
+    `)
+
     this.searchStatement = this.db.prepare<
       [string, string, string | null, string | null, number],
       { cache_key: string }
@@ -781,6 +797,13 @@ export class SqliteMemcachedKeyIndexRepository
         AND (? IS NULL OR cache_key > ?)
       ORDER BY cache_key COLLATE NOCASE ASC
       LIMIT ?
+    `)
+
+    this.countByPatternStatement = this.db.prepare<[string, string], { total: number }>(`
+      SELECT COUNT(*) AS total
+      FROM memcached_key_index
+      WHERE connection_id = ?
+        AND cache_key LIKE ? ESCAPE '\\'
     `)
 
     this.upsertStatement = this.db.prepare(`
@@ -804,6 +827,11 @@ export class SqliteMemcachedKeyIndexRepository
     return rows.map((row) => row.cache_key)
   }
 
+  public async countKeys(connectionId: string): Promise<number> {
+    const row = this.countStatement.get(connectionId)
+    return row?.total ?? 0
+  }
+
   public async searchKeys(
     connectionId: string,
     pattern: string,
@@ -820,6 +848,17 @@ export class SqliteMemcachedKeyIndexRepository
       limit,
     )
     return rows.map((row) => row.cache_key)
+  }
+
+  public async countKeysByPattern(
+    connectionId: string,
+    pattern: string,
+  ): Promise<number> {
+    const row = this.countByPatternStatement.get(
+      connectionId,
+      toSqlLikePattern(pattern),
+    )
+    return row?.total ?? 0
   }
 
   public async upsertKey(connectionId: string, key: string): Promise<void> {

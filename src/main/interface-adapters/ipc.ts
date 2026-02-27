@@ -149,6 +149,8 @@ const handleQuery = async (
 			return service.listKeys(envelope.payload)
 		case 'key.search':
 			return service.searchKeys(envelope.payload)
+		case 'key.count':
+			return service.countKeys(envelope.payload)
 		case 'key.get':
 			return service.getKey(envelope.payload)
 		case 'snapshot.list':

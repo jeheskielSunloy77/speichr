@@ -113,6 +113,38 @@ class InMemoryCacheGateway implements CacheGateway {
 		}
 	}
 
+	public async countKeys(
+		profile: ConnectionProfile,
+		_secret: ConnectionSecret,
+	): Promise<{ totalKeys: number }> {
+		void _secret
+		const totalKeys = Array.from(this.map.keys()).filter((fullKey) =>
+			fullKey.startsWith(`${profile.id}:`),
+		).length
+
+		return {
+			totalKeys,
+		}
+	}
+
+	public async countKeysByPattern(
+		profile: ConnectionProfile,
+		_secret: ConnectionSecret,
+		args: { pattern: string },
+	): Promise<{ totalKeys: number; totalFoundKeys: number }> {
+		void _secret
+		const matcher = toRegex(args.pattern)
+		const keys = Array.from(this.map.keys())
+			.filter((fullKey) => fullKey.startsWith(`${profile.id}:`))
+			.map((fullKey) => fullKey.replace(`${profile.id}:`, ''))
+		const totalFoundKeys = keys.filter((key) => matcher.test(key)).length
+
+		return {
+			totalKeys: keys.length,
+			totalFoundKeys,
+		}
+	}
+
 	public async getValue(
 		profile: ConnectionProfile,
 		_secret: ConnectionSecret,

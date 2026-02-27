@@ -75,6 +75,11 @@ class InMemoryMemcachedIndexRepository implements MemcachedKeyIndexRepository {
 		return []
 	}
 
+	public async countKeys(connectionId: string): Promise<number> {
+		void connectionId
+		return 0
+	}
+
 	public async searchKeys(
 		connectionId: string,
 		pattern: string,
@@ -86,6 +91,15 @@ class InMemoryMemcachedIndexRepository implements MemcachedKeyIndexRepository {
 		void limit
 		void cursor
 		return []
+	}
+
+	public async countKeysByPattern(
+		connectionId: string,
+		pattern: string,
+	): Promise<number> {
+		void connectionId
+		void pattern
+		return 0
 	}
 
 	public async upsertKey(connectionId: string, key: string): Promise<void> {
@@ -118,6 +132,8 @@ const createGatewayMock = (overrides?: Partial<CacheGateway>): CacheGateway => {
 		getCapabilities: vi.fn(() => capabilities),
 		listKeys: vi.fn(async () => ({ keys: [], nextCursor: undefined })),
 		searchKeys: vi.fn(async () => ({ keys: [], nextCursor: undefined })),
+		countKeys: vi.fn(async () => ({ totalKeys: 0 })),
+		countKeysByPattern: vi.fn(async () => ({ totalKeys: 0, totalFoundKeys: 0 })),
 		getValue: vi.fn(async (profile, _secret, key) => ({
 			key,
 			value: null,
@@ -451,6 +467,111 @@ describe('SpeichrService', () => {
 		})
 
 		expect(deleteKeyMock).toHaveBeenCalledTimes(1)
+	})
+
+	it('returns exact key totals with and without pattern filters', async () => {
+		const repository = new InMemoryConnectionRepository()
+		const secretStore = new InMemorySecretStore()
+		const memcachedIndex = new InMemoryMemcachedIndexRepository()
+		const countKeysMock = vi.fn(async () => ({ totalKeys: 42 }))
+		const countKeysByPatternMock = vi.fn(async () => ({
+			totalKeys: 42,
+			totalFoundKeys: 9,
+		}))
+		const gateway = createGatewayMock({
+			countKeys: countKeysMock,
+			countKeysByPattern: countKeysByPatternMock,
+		})
+
+		const profile: ConnectionProfile = {
+			...createStoredProfile(),
+			id: 'count-1',
+			secretRef: 'count-1',
+		}
+
+		await repository.save(profile)
+		await secretStore.saveSecret(profile.id, { password: 'secret' })
+
+		const service = new SpeichrService(
+			repository,
+			secretStore,
+			memcachedIndex,
+			gateway,
+		)
+
+		const unfiltered = await service.countKeys({
+			connectionId: profile.id,
+		})
+		const filtered = await service.countKeys({
+			connectionId: profile.id,
+			pattern: 'session:*',
+		})
+
+		expect(unfiltered).toEqual({ totalKeys: 42 })
+		expect(filtered).toEqual({ totalKeys: 42, totalFoundKeys: 9 })
+		expect(countKeysMock).toHaveBeenCalledTimes(1)
+		expect(countKeysByPatternMock).toHaveBeenCalledWith(
+			expect.objectContaining({ id: profile.id }),
+			expect.any(Object),
+			{ pattern: 'session:*' },
+		)
+	})
+
+	it('lists prefix namespaces using scoped pattern search and strips prefixes', async () => {
+		const repository = new InMemoryConnectionRepository()
+		const secretStore = new InMemorySecretStore()
+		const memcachedIndex = new InMemoryMemcachedIndexRepository()
+		const listKeysMock = vi.fn(async () => ({ keys: ['fallback'], nextCursor: '7' }))
+		const searchKeysMock = vi.fn(async () => ({
+			keys: ['tenant:user:1', 'tenant:user:2'],
+			nextCursor: '13',
+		}))
+		const gateway = createGatewayMock({
+			listKeys: listKeysMock,
+			searchKeys: searchKeysMock,
+		})
+
+		const profile: ConnectionProfile = {
+			...createStoredProfile(),
+			id: 'namespace-prefix-1',
+			secretRef: 'namespace-prefix-1',
+		}
+
+		await repository.save(profile)
+		await secretStore.saveSecret(profile.id, { password: 'secret' })
+
+		const service = new SpeichrService(
+			repository,
+			secretStore,
+			memcachedIndex,
+			gateway,
+		)
+
+		const namespace = await service.createNamespace({
+			namespace: {
+				connectionId: profile.id,
+				name: 'tenant-a',
+				strategy: 'keyPrefix',
+				keyPrefix: 'tenant:',
+			},
+		})
+
+		const result = await service.listKeys({
+			connectionId: profile.id,
+			namespaceId: namespace.id,
+			limit: 100,
+		})
+
+		expect(result).toEqual({
+			keys: ['user:1', 'user:2'],
+			nextCursor: '13',
+		})
+		expect(searchKeysMock).toHaveBeenCalledWith(
+			expect.objectContaining({ id: profile.id }),
+			expect.any(Object),
+			{ pattern: 'tenant:*', cursor: undefined, limit: 100 },
+		)
+		expect(listKeysMock).not.toHaveBeenCalled()
 	})
 
 	it('restores keys from latest snapshot records', async () => {

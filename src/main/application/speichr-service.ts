@@ -53,6 +53,8 @@ import type {
 	IncidentBundlePreview,
 	IncidentBundlePreviewRequest,
 	IncidentExportJob,
+	KeyCountRequest,
+	KeyCountResult,
 	KeyDeleteRequest,
 	KeyGetRequest,
 	KeyListRequest,
@@ -942,16 +944,23 @@ export class SpeichrService {
 			payload.namespaceId,
 		)
 		const keyScope = this.createNamespaceKeyScope(scope.namespace)
+		const namespacePrefix = this.resolveNamespacePrefix(scope.namespace)
 
 		const { result } = await this.executeWithPolicy({
 			profile: scope.profile,
 			action: 'key.list',
 			keyOrPattern: payload.cursor ?? '*',
 			run: () =>
-				this.cacheGateway.listKeys(scope.profile, scope.secret, {
-					cursor: payload.cursor,
-					limit: payload.limit,
-				}),
+				namespacePrefix
+					? this.cacheGateway.searchKeys(scope.profile, scope.secret, {
+							pattern: `${namespacePrefix}*`,
+							cursor: payload.cursor,
+							limit: payload.limit,
+						})
+					: this.cacheGateway.listKeys(scope.profile, scope.secret, {
+							cursor: payload.cursor,
+							limit: payload.limit,
+						}),
 		})
 
 		return {
@@ -984,6 +993,55 @@ export class SpeichrService {
 			keys: keyScope.mapOutgoingKeys(result.keys),
 			nextCursor: result.nextCursor,
 		}
+	}
+
+	public async countKeys(payload: KeyCountRequest): Promise<KeyCountResult> {
+		const scope = await this.requireProfileWithSecretAndNamespace(
+			payload.connectionId,
+			payload.namespaceId,
+		)
+		const keyScope = this.createNamespaceKeyScope(scope.namespace)
+		const namespacePrefix = this.resolveNamespacePrefix(scope.namespace)
+		const trimmedPattern = payload.pattern?.trim()
+		const hasPattern = Boolean(trimmedPattern && trimmedPattern.length > 0)
+
+		if (!hasPattern) {
+			if (namespacePrefix) {
+				const scopedTotal = await this.cacheGateway.countKeysByPattern(
+					scope.profile,
+					scope.secret,
+					{
+						pattern: `${namespacePrefix}*`,
+					},
+				)
+				return {
+					totalKeys: scopedTotal.totalFoundKeys ?? 0,
+				}
+			}
+
+			return this.cacheGateway.countKeys(scope.profile, scope.secret)
+		}
+
+		const pattern = trimmedPattern ?? ''
+		if (namespacePrefix) {
+			const [totalResult, foundResult] = await Promise.all([
+				this.cacheGateway.countKeysByPattern(scope.profile, scope.secret, {
+					pattern: `${namespacePrefix}*`,
+				}),
+				this.cacheGateway.countKeysByPattern(scope.profile, scope.secret, {
+					pattern: keyScope.mapPatternForQuery(pattern),
+				}),
+			])
+
+			return {
+				totalKeys: totalResult.totalFoundKeys ?? 0,
+				totalFoundKeys: foundResult.totalFoundKeys ?? 0,
+			}
+		}
+
+		return this.cacheGateway.countKeysByPattern(scope.profile, scope.secret, {
+			pattern,
+		})
 	}
 
 	public async getKey(payload: KeyGetRequest): Promise<KeyValueRecord> {
@@ -3302,10 +3360,7 @@ export class SpeichrService {
 		mapPatternForQuery: (pattern: string) => string
 		mapOutgoingKeys: (keys: string[]) => string[]
 	} {
-		const prefix =
-			namespace && namespace.strategy === 'keyPrefix'
-				? namespace.keyPrefix ?? ''
-				: ''
+		const prefix = this.resolveNamespacePrefix(namespace)
 
 		if (!prefix) {
 			return {
@@ -3323,6 +3378,14 @@ export class SpeichrService {
 					.filter((key) => key.startsWith(prefix))
 					.map((key) => key.slice(prefix.length)),
 		}
+	}
+
+	private resolveNamespacePrefix(namespace: NamespaceProfile | null): string {
+		if (!namespace || namespace.strategy !== 'keyPrefix') {
+			return ''
+		}
+
+		return namespace.keyPrefix ?? ''
 	}
 
 	private async requireNamespaceForConnection(

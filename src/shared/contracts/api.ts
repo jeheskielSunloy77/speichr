@@ -35,6 +35,7 @@ import type {
 	IncidentBundleListRequest,
 	IncidentBundlePreviewRequest,
 	KeyDeleteRequest,
+	KeyCountRequest,
 	KeyGetRequest,
 	KeyListRequest,
 	KeySearchRequest,
@@ -96,6 +97,9 @@ export interface SpeichrApi {
 	searchKeys: (
 		payload: KeySearchRequest,
 	) => Promise<IpcResponseEnvelope<QueryResultMap['key.search']>>
+	countKeys: (
+		payload: KeyCountRequest,
+	) => Promise<IpcResponseEnvelope<QueryResultMap['key.count']>>
 	getKey: (
 		payload: KeyGetRequest,
 	) => Promise<IpcResponseEnvelope<QueryResultMap['key.get']>>

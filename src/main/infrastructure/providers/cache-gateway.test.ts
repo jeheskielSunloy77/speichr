@@ -8,6 +8,7 @@ import type { MemcachedKeyIndexRepository } from '../../application/ports'
 import { DefaultCacheGateway } from './cache-gateway'
 
 const redisScanMock = vi.fn()
+const redisDbSizeMock = vi.fn()
 const redisConnectMock = vi.fn(async () => undefined)
 const redisDisconnectMock = vi.fn(async () => undefined)
 
@@ -15,6 +16,7 @@ vi.mock('redis', () => ({
   createClient: vi.fn(() => ({
     connect: redisConnectMock,
     scan: redisScanMock,
+    dbSize: redisDbSizeMock,
     disconnect: redisDisconnectMock,
     isOpen: true,
   })),
@@ -59,7 +61,9 @@ const createMemcachedRepository = (
   keys: string[],
 ): MemcachedKeyIndexRepository => ({
   listKeys: vi.fn(async () => []),
+  countKeys: vi.fn(async () => keys.length),
   searchKeys: vi.fn(async () => keys),
+  countKeysByPattern: vi.fn(async () => keys.length),
   upsertKey: vi.fn(async () => undefined),
   removeKey: vi.fn(async () => undefined),
   deleteByConnectionId: vi.fn(async () => undefined),
@@ -68,6 +72,7 @@ const createMemcachedRepository = (
 describe('DefaultCacheGateway search pagination', () => {
   beforeEach(() => {
     redisScanMock.mockReset()
+    redisDbSizeMock.mockReset()
     redisConnectMock.mockClear()
     redisDisconnectMock.mockClear()
   })
@@ -143,5 +148,45 @@ describe('DefaultCacheGateway search pagination', () => {
 
     expect(result.keys).toEqual(['k1'])
     expect(result.nextCursor).toBeUndefined()
+  })
+
+  it('returns exact redis pattern counts by scanning to terminal cursor', async () => {
+    redisDbSizeMock.mockResolvedValueOnce(30)
+    redisScanMock
+      .mockResolvedValueOnce({
+        keys: ['user:1', 'user:2'],
+        cursor: '5',
+      })
+      .mockResolvedValueOnce({
+        keys: ['user:2', 'user:3'],
+        cursor: '0',
+      })
+
+    const gateway = new DefaultCacheGateway(createMemcachedRepository([]))
+
+    const result = await gateway.countKeysByPattern(redisProfile, secret, {
+      pattern: 'user:*',
+    })
+
+    expect(result).toEqual({
+      totalKeys: 30,
+      totalFoundKeys: 3,
+    })
+  })
+
+  it('returns memcached total and filtered counts from index repository', async () => {
+    const repository = createMemcachedRepository(['k1', 'k2', 'k3'])
+    const gateway = new DefaultCacheGateway(repository)
+
+    const result = await gateway.countKeysByPattern(memcachedProfile, secret, {
+      pattern: 'k*',
+    })
+
+    expect(result).toEqual({
+      totalKeys: 3,
+      totalFoundKeys: 3,
+    })
+    expect(repository.countKeys).toHaveBeenCalledWith('mem-1')
+    expect(repository.countKeysByPattern).toHaveBeenCalledWith('mem-1', 'k*')
   })
 })

@@ -5,6 +5,7 @@ import type {
 	ConnectionDraft,
 	ConnectionProfile,
 	ConnectionSecret,
+	KeyCountResult,
 	ConnectionTestResult,
 	KeyListResult,
 	KeyValueRecord,
@@ -110,6 +111,39 @@ export class DefaultCacheGateway implements CacheGateway {
 		return {
 			keys,
 			nextCursor,
+		}
+	}
+
+	public async countKeys(
+		profile: ConnectionProfile,
+		secret: ConnectionSecret,
+	): Promise<KeyCountResult> {
+		if (profile.engine === 'redis') {
+			return this.redisCountKeys(profile, secret)
+		}
+
+		return {
+			totalKeys: await this.memcachedIndexRepository.countKeys(profile.id),
+		}
+	}
+
+	public async countKeysByPattern(
+		profile: ConnectionProfile,
+		secret: ConnectionSecret,
+		args: { pattern: string },
+	): Promise<KeyCountResult> {
+		if (profile.engine === 'redis') {
+			return this.redisCountKeysByPattern(profile, secret, args)
+		}
+
+		const [totalKeys, totalFoundKeys] = await Promise.all([
+			this.memcachedIndexRepository.countKeys(profile.id),
+			this.memcachedIndexRepository.countKeysByPattern(profile.id, args.pattern),
+		])
+
+		return {
+			totalKeys,
+			totalFoundKeys,
 		}
 	}
 
@@ -359,6 +393,59 @@ export class DefaultCacheGateway implements CacheGateway {
 			return {
 				keys: Array.from(keySet).slice(0, args.limit),
 				nextCursor: cursor === '0' ? undefined : cursor,
+			}
+		} catch (error) {
+			throw this.toConnectionFailure(error)
+		} finally {
+			await this.disconnectRedisClient(client)
+		}
+	}
+
+	private async redisCountKeys(
+		profile: ConnectionProfile,
+		secret: ConnectionSecret,
+	): Promise<KeyCountResult> {
+		const client = this.createRedisClient(profile, secret)
+
+		try {
+			await client.connect()
+			const totalKeys = await client.dbSize()
+			return {
+				totalKeys,
+			}
+		} catch (error) {
+			throw this.toConnectionFailure(error)
+		} finally {
+			await this.disconnectRedisClient(client)
+		}
+	}
+
+	private async redisCountKeysByPattern(
+		profile: ConnectionProfile,
+		secret: ConnectionSecret,
+		args: { pattern: string },
+	): Promise<KeyCountResult> {
+		const client = this.createRedisClient(profile, secret)
+		const matches = new Set<string>()
+
+		try {
+			await client.connect()
+
+			let cursor = '0'
+			do {
+				const scanResult = await client.scan(cursor, {
+					MATCH: args.pattern,
+					COUNT: 1000,
+				})
+				scanResult.keys.forEach((key) => {
+					matches.add(toRedisText(key))
+				})
+				cursor = toRedisText(scanResult.cursor)
+			} while (cursor !== '0')
+
+			return {
+				totalKeys: await client.dbSize(),
+				totalFoundKeys: matches.size,
 			}
 		} catch (error) {
 			throw this.toConnectionFailure(error)

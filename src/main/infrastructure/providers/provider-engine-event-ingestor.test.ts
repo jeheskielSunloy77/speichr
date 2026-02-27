@@ -81,6 +81,8 @@ describe('ProviderEngineEventIngestor', () => {
       })),
       listKeys: vi.fn(async () => ({ keys: [], nextCursor: undefined })),
       searchKeys: vi.fn(async () => ({ keys: [], nextCursor: undefined })),
+      countKeys: vi.fn(async () => ({ totalKeys: 0 })),
+      countKeysByPattern: vi.fn(async () => ({ totalKeys: 0, totalFoundKeys: 0 })),
       getValue: vi.fn(async (profile, _secret, key) => ({
         key,
         value: null,

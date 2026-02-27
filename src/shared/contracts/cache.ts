@@ -194,6 +194,12 @@ export interface KeySearchRequest {
   limit: number
 }
 
+export interface KeyCountRequest {
+  connectionId: string
+  namespaceId?: string
+  pattern?: string
+}
+
 export interface KeyGetRequest {
   connectionId: string
   namespaceId?: string
@@ -218,6 +224,11 @@ export interface KeyDeleteRequest {
 export interface KeyListResult {
   keys: string[]
   nextCursor?: string
+}
+
+export interface KeyCountResult {
+  totalKeys: number
+  totalFoundKeys?: number
 }
 
 export interface KeyValueRecord {

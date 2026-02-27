@@ -204,6 +204,14 @@ const keySearchPayloadSchema = z
   })
   .strict()
 
+const keyCountPayloadSchema = z
+  .object({
+    connectionId: idSchema,
+    namespaceId: idSchema.optional(),
+    pattern: z.string().min(1).optional(),
+  })
+  .strict()
+
 const keyGetPayloadSchema = z
   .object({
     connectionId: idSchema,
@@ -839,6 +847,13 @@ export const queryEnvelopeSchema = z.discriminatedUnion('query', [
     .object({
       query: z.literal('key.search'),
       payload: keySearchPayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      query: z.literal('key.count'),
+      payload: keyCountPayloadSchema,
       correlationId: correlationIdSchema,
     })
     .strict(),
