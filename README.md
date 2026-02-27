@@ -8,7 +8,7 @@ Speichr is an Electron desktop app for managing cache connections, workflow auto
 - macOS: ZIP archive (`.zip`).
 - Linux: Debian package (`.deb`) and ZIP archive (`.zip`).
 
-All release assets are built in GitHub Actions and attached to draft releases.
+All release assets are built in GitHub Actions and attached to GitHub releases.
 
 ## Installation
 
