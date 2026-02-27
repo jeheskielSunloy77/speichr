@@ -6,7 +6,6 @@ import {
 	PlusIcon,
 	SearchIcon,
 	ServerIcon,
-	Settings2Icon,
 	Trash2Icon,
 	XIcon,
 } from 'lucide-react'
@@ -92,8 +91,7 @@ const formatUpdatedAt = (value: string): string => {
 export const ConnectionsPage = () => {
 	const queryClient = useQueryClient()
 	const navigate = useNavigate()
-	const { selectedConnectionId, setSelectedConnectionId, setSettingsOpen } =
-		useUiStore()
+	const { selectedConnectionId, setSelectedConnectionId } = useUiStore()
 
 	const [searchText, setSearchText] = React.useState('')
 	const [engineFilter, setEngineFilter] =
@@ -179,25 +177,20 @@ export const ConnectionsPage = () => {
 			: 'Unable to load connections.'
 
 	return (
-		<div className='bg-background text-foreground min-h-screen p-6'>
+		<div className='bg-background text-foreground h-full min-h-0 overflow-auto p-6'>
 			<div className='mx-auto flex w-full max-w-5xl flex-col gap-4'>
 				<Card>
 					<CardHeader className='pb-3'>
 						<div className='flex flex-wrap items-center justify-between gap-3'>
-							<div>
-								<CardTitle>Connection Management</CardTitle>
-								<CardDescription>
-									Manage saved Redis and Memcached profiles before entering the
-									workspace.
-								</CardDescription>
-							</div>
-							<div className='flex items-center gap-2'>
-								<Button variant='outline' onClick={() => setSettingsOpen(true)}>
-									<Settings2Icon className='size-3.5' />
-									Settings
-								</Button>
-								<Button onClick={openCreateConnectionDialog}>
-									<PlusIcon className='size-3.5' />
+								<div>
+									<CardTitle>Connection Management</CardTitle>
+									<CardDescription>
+										Manage saved Redis and Memcached profiles.
+									</CardDescription>
+								</div>
+								<div className='flex items-center gap-2'>
+									<Button onClick={openCreateConnectionDialog}>
+										<PlusIcon className='size-3.5' />
 									Add Connection
 								</Button>
 							</div>

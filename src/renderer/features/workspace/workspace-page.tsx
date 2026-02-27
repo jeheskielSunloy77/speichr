@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeftIcon, ServerIcon, Settings2Icon, ShieldIcon } from 'lucide-react'
 import * as React from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import {
@@ -31,7 +30,6 @@ import {
 	TabsList,
 	TabsTrigger,
 } from '@/renderer/components/ui/tabs'
-import { AlertsPanel } from '@/renderer/features/alerts/alerts-panel'
 import {
 	RendererOperationError,
 	unwrapResponse,
@@ -55,8 +53,13 @@ type WorkspaceTab =
 	| 'workspace'
 	| 'workflows'
 	| 'observability'
-	| 'alerts'
 	| 'governance'
+
+const isWorkspaceTab = (value: string | null): value is WorkspaceTab =>
+	value === 'workspace' ||
+	value === 'workflows' ||
+	value === 'observability' ||
+	value === 'governance'
 
 const defaultKeyListResult: KeyListResult = {
 	keys: [],
@@ -104,17 +107,17 @@ const getQueryErrorState = (error: unknown): QueryErrorState | undefined => {
 
 export const WorkspacePage = () => {
 	const queryClient = useQueryClient()
-	const navigate = useNavigate()
+	const [searchParams, setSearchParams] = useSearchParams()
 
 	const {
 		selectedConnectionId,
 		selectedKey,
 		setSelectedConnectionId,
 		setSelectedKey,
-		setSettingsOpen,
 	} = useUiStore()
 
-	const [activeTab, setActiveTab] = React.useState<WorkspaceTab>('workspace')
+	const rawTab = searchParams.get('tab')
+	const activeTab: WorkspaceTab = isWorkspaceTab(rawTab) ? rawTab : 'workspace'
 	const [keyPendingDelete, setKeyPendingDelete] = React.useState<string | null>(
 		null,
 	)
@@ -129,6 +132,16 @@ export const WorkspacePage = () => {
 	const [keyName, setKeyName] = React.useState('')
 	const [keyValue, setKeyValue] = React.useState('')
 	const [keyTtlSeconds, setKeyTtlSeconds] = React.useState('')
+
+	React.useEffect(() => {
+		if (isWorkspaceTab(rawTab)) {
+			return
+		}
+
+		const nextSearchParams = new URLSearchParams(searchParams)
+		nextSearchParams.set('tab', 'workspace')
+		setSearchParams(nextSearchParams, { replace: true })
+	}, [rawTab, searchParams, setSearchParams])
 
 	const connectionsQuery = useQuery({
 		queryKey: ['connections'],
@@ -247,19 +260,6 @@ export const WorkspacePage = () => {
 			)
 		},
 	})
-
-	const unreadAlertsQuery = useQuery({
-		queryKey: ['alerts', 'unread-count'],
-		queryFn: async () =>
-			unwrapResponse(
-				await window.speichr.listAlerts({
-					unreadOnly: true,
-					limit: 200,
-				}),
-			),
-	})
-
-	const unreadAlertCount = unreadAlertsQuery.data?.length ?? 0
 
 	const capabilitiesError = getQueryErrorState(capabilitiesQuery.error)
 	const keyListError = getQueryErrorState(keyListQuery.error)
@@ -452,7 +452,7 @@ export const WorkspacePage = () => {
 	}
 
 	return (
-		<div className='bg-background text-foreground h-screen overflow-hidden p-4'>
+		<div className='bg-background text-foreground h-full min-h-0 overflow-hidden p-4'>
 			{connectionsQuery.isLoading ? (
 				<div className='grid h-full place-items-center'>
 					<Card>
@@ -462,61 +462,7 @@ export const WorkspacePage = () => {
 					</Card>
 				</div>
 			) : selectedConnection ? (
-				<div className='grid h-full min-h-0 grid-rows-[auto_1fr] gap-3'>
-					<Card>
-						<CardContent className='flex items-center justify-between gap-3 p-3'>
-							<div className='min-w-0'>
-								<div className='flex items-center gap-2'>
-									<ServerIcon className='size-4' />
-									<p className='truncate text-sm font-medium'>
-										{selectedConnection.name}
-									</p>
-									<Badge variant='outline'>{selectedConnection.engine}</Badge>
-									<Badge variant='outline'>{selectedConnection.environment}</Badge>
-									{(selectedConnection.readOnly ||
-										selectedConnection.forceReadOnly) && (
-										<Badge variant='destructive'>
-											<ShieldIcon className='size-3' />
-											Read-only
-										</Badge>
-									)}
-								</div>
-								<p className='text-muted-foreground truncate text-xs'>
-									{selectedConnection.host}:{selectedConnection.port}
-								</p>
-								<p className='text-muted-foreground truncate text-xs'>
-									timeout: {selectedConnection.timeoutMs}ms | retry:{' '}
-									{selectedConnection.retryMaxAttempts ?? 1}x (
-									{selectedConnection.retryBackoffStrategy ?? 'fixed'})
-								</p>
-							</div>
-
-							<div className='flex items-center gap-2'>
-								<div className='text-muted-foreground hidden text-xs lg:block'>
-									{selectedConnection.engine === 'memcached' &&
-										'Memcached key search is based on app-indexed keys.'}
-									{selectedConnection.environment === 'prod' &&
-										' Prod guardrails are active.'}
-								</div>
-								<Button
-									variant='outline'
-									size='sm'
-									onClick={() => navigate('/connections')}
-								>
-									<ArrowLeftIcon className='size-3.5' />
-									Manage Connections
-								</Button>
-								<Button
-									variant='ghost'
-									size='icon-sm'
-									onClick={() => setSettingsOpen(true)}
-								>
-									<Settings2Icon className='size-4' />
-								</Button>
-							</div>
-						</CardContent>
-					</Card>
-
+				<div className='grid h-full min-h-0 gap-3'>
 					{capabilitiesError && activeTab === 'workspace' && (
 						<Card>
 							<CardContent className='flex items-center justify-between gap-3 p-3'>
@@ -545,17 +491,18 @@ export const WorkspacePage = () => {
 
 					<Tabs
 						value={activeTab}
-						onValueChange={(value) => setActiveTab(value as WorkspaceTab)}
+						onValueChange={(value) => {
+							const nextTab = value as WorkspaceTab
+							const nextSearchParams = new URLSearchParams(searchParams)
+							nextSearchParams.set('tab', nextTab)
+							setSearchParams(nextSearchParams, { replace: true })
+						}}
 						className='grid min-h-0 grid-rows-[auto_1fr] gap-3'
 					>
 						<TabsList>
 							<TabsTrigger value='workspace'>Workspace</TabsTrigger>
 							<TabsTrigger value='workflows'>Workflows</TabsTrigger>
 							<TabsTrigger value='observability'>Observability</TabsTrigger>
-							<TabsTrigger value='alerts'>
-								Alerts
-								{unreadAlertCount > 0 ? ` (${unreadAlertCount})` : ''}
-							</TabsTrigger>
 							<TabsTrigger value='governance'>Governance</TabsTrigger>
 						</TabsList>
 
@@ -634,22 +581,21 @@ export const WorkspacePage = () => {
 						</TabsContent>
 
 						<TabsContent value='workflows' className='min-h-0 overflow-auto'>
-							<WorkflowPanel connection={selectedConnection} />
+							<WorkflowPanel connection={selectedConnection} mode='connection' />
 						</TabsContent>
 
 						<TabsContent
 							value='observability'
 							className='min-h-0 overflow-auto'
 						>
-							<ObservabilityPanel connection={selectedConnection} />
-						</TabsContent>
-
-						<TabsContent value='alerts' className='min-h-0 overflow-auto'>
-							<AlertsPanel connection={selectedConnection} />
+							<ObservabilityPanel
+								connection={selectedConnection}
+								mode='connection'
+							/>
 						</TabsContent>
 
 						<TabsContent value='governance' className='min-h-0 overflow-auto'>
-							<GovernancePanel connection={selectedConnection} />
+							<GovernancePanel connection={selectedConnection} mode='connection' />
 						</TabsContent>
 					</Tabs>
 				</div>

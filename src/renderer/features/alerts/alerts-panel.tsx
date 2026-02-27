@@ -18,7 +18,7 @@ import { unwrapResponse } from '@/renderer/features/common/ipc'
 import type { AlertRule, ConnectionProfile } from '@/shared/contracts/cache'
 
 type AlertsPanelProps = {
-	connection: ConnectionProfile
+	connection: ConnectionProfile | null
 }
 
 const getSeverityVariant = (
@@ -48,16 +48,16 @@ type RuleFormState = {
 }
 
 const createDefaultRuleForm = (
-	connection: ConnectionProfile,
+	connection: ConnectionProfile | null,
 ): RuleFormState => ({
 	name: '',
 	metric: 'errorRate',
 	threshold: '0.2',
 	lookbackMinutes: '5',
 	severity: 'warning',
-	connectionScoped: true,
-	connectionId: connection.id,
-	environment: connection.environment,
+	connectionScoped: Boolean(connection),
+	connectionId: connection?.id ?? '',
+	environment: connection?.environment ?? '',
 	enabled: true,
 })
 
@@ -112,10 +112,10 @@ export const AlertsPanel = ({ connection }: AlertsPanelProps) => {
 
 		setRuleForm((current) => ({
 			...current,
-			connectionId: connection.id,
-			environment: current.environment || connection.environment,
+			connectionId: connection?.id ?? '',
+			environment: current.environment || connection?.environment || '',
 		}))
-	}, [connection.id, connection.environment, editingRuleId])
+	}, [connection, editingRuleId])
 
 	const alertsQuery = useQuery({
 		queryKey: ['alerts', unreadOnly],

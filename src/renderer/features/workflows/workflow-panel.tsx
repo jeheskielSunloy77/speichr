@@ -32,7 +32,8 @@ import type {
 } from '@/shared/contracts/cache'
 
 type WorkflowPanelProps = {
-	connection: ConnectionProfile
+	connection?: ConnectionProfile | null
+	mode?: 'connection' | 'templates'
 }
 
 const PREVIEW_PAGE_SIZE = 100
@@ -65,8 +66,14 @@ const getStatusBadgeVariant = (
 	return 'outline'
 }
 
-export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
+export const WorkflowPanel = ({
+	connection = null,
+	mode = 'connection',
+}: WorkflowPanelProps) => {
 	const queryClient = useQueryClient()
+	const isConnectionMode = mode === 'connection'
+	const isTemplatesMode = mode === 'templates'
+	const connectionId = connection?.id ?? null
 
 	const [selectedTemplateId, setSelectedTemplateId] = React.useState<string>('')
 	const [templateName, setTemplateName] = React.useState('')
@@ -97,11 +104,12 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
 	})
 
 	const executionsQuery = useQuery({
-		queryKey: ['workflow-executions', connection.id],
+		queryKey: ['workflow-executions', connectionId],
+		enabled: isConnectionMode && Boolean(connectionId),
 		queryFn: async () =>
 			unwrapResponse(
 				await window.speichr.listWorkflowExecutions({
-					connectionId: connection.id,
+					connectionId: connectionId ?? '',
 					limit: 50,
 				}),
 			),
@@ -113,7 +121,9 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
 			setSelectedTemplateId('inline')
 			setTemplateName(emptyTemplate.name)
 			setTemplateKind(emptyTemplate.kind)
-			setTemplateParametersText(JSON.stringify(emptyTemplate.parameters, null, 2))
+			setTemplateParametersText(
+				JSON.stringify(emptyTemplate.parameters, null, 2),
+			)
 			setRequiresApprovalOnProd(emptyTemplate.requiresApprovalOnProd)
 			setSupportsDryRun(emptyTemplate.supportsDryRun)
 			return
@@ -124,7 +134,9 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
 			setSelectedTemplateId(firstTemplate.id)
 			setTemplateName(firstTemplate.name)
 			setTemplateKind(firstTemplate.kind)
-			setTemplateParametersText(JSON.stringify(firstTemplate.parameters, null, 2))
+			setTemplateParametersText(
+				JSON.stringify(firstTemplate.parameters, null, 2),
+			)
 			setRequiresApprovalOnProd(firstTemplate.requiresApprovalOnProd)
 			setSupportsDryRun(firstTemplate.supportsDryRun)
 		}
@@ -218,7 +230,9 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
 			await queryClient.invalidateQueries({ queryKey: ['workflow-templates'] })
 		},
 		onError: (error) => {
-			toast.error(error instanceof Error ? error.message : 'Template save failed.')
+			toast.error(
+				error instanceof Error ? error.message : 'Template save failed.',
+			)
 		},
 	})
 
@@ -249,9 +263,13 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
 
 	const previewMutation = useMutation({
 		mutationFn: async (args?: { cursor?: string }) => {
+			if (!connectionId) {
+				throw new Error('Select a connection first.')
+			}
+
 			return unwrapResponse(
 				await window.speichr.previewWorkflow({
-					connectionId: connection.id,
+					connectionId,
 					...buildTemplateSource(),
 					cursor: args?.cursor,
 					limit: PREVIEW_PAGE_SIZE,
@@ -269,9 +287,13 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
 
 	const executeMutation = useMutation({
 		mutationFn: async (dryRun: boolean) => {
+			if (!connectionId) {
+				throw new Error('Select a connection first.')
+			}
+
 			return unwrapResponse(
 				await window.speichr.executeWorkflow({
-					connectionId: connection.id,
+					connectionId,
 					...buildTemplateSource(),
 					dryRun,
 					guardrailConfirmed: prodGuardrailConfirmed,
@@ -289,12 +311,14 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
 		},
 		onSuccess: async (result) => {
 			toast.success(`Workflow ${result.status}.`)
-			await queryClient.invalidateQueries({
-				queryKey: ['workflow-executions', connection.id],
-			})
-			await queryClient.invalidateQueries({
-				queryKey: ['observability-dashboard', connection.id],
-			})
+			if (connectionId) {
+				await queryClient.invalidateQueries({
+					queryKey: ['workflow-executions', connectionId],
+				})
+				await queryClient.invalidateQueries({
+					queryKey: ['observability-dashboard', connectionId],
+				})
+			}
 			await queryClient.invalidateQueries({ queryKey: ['alerts'] })
 		},
 		onError: (error) => {
@@ -316,9 +340,11 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
 		},
 		onSuccess: async (result) => {
 			toast.success(`Workflow rerun ${result.status}.`)
-			await queryClient.invalidateQueries({
-				queryKey: ['workflow-executions', connection.id],
-			})
+			if (connectionId) {
+				await queryClient.invalidateQueries({
+					queryKey: ['workflow-executions', connectionId],
+				})
+			}
 			await queryClient.invalidateQueries({ queryKey: ['alerts'] })
 		},
 		onError: (error) => {
@@ -338,12 +364,14 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
 			),
 		onSuccess: async (result) => {
 			toast.success(`Workflow resume ${result.status}.`)
-			await queryClient.invalidateQueries({
-				queryKey: ['workflow-executions', connection.id],
-			})
-			await queryClient.invalidateQueries({
-				queryKey: ['observability-dashboard', connection.id],
-			})
+			if (connectionId) {
+				await queryClient.invalidateQueries({
+					queryKey: ['workflow-executions', connectionId],
+				})
+				await queryClient.invalidateQueries({
+					queryKey: ['observability-dashboard', connectionId],
+				})
+			}
 			await queryClient.invalidateQueries({ queryKey: ['alerts'] })
 		},
 		onError: (error) => {
@@ -361,22 +389,35 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
 		rerunMutation.isPending ||
 		resumeMutation.isPending
 
+	if (isConnectionMode && !connection) {
+		return (
+			<Card>
+				<CardContent className="p-4 text-xs text-muted-foreground">
+					Select a connection to run workflows.
+				</CardContent>
+			</Card>
+		)
+	}
+
 	return (
-		<div className='grid min-h-0 gap-3 xl:grid-cols-[1fr_1fr]'>
+		<div className="grid min-h-0 gap-3 xl:grid-cols-[1fr_1fr]">
 			<Card>
 				<CardHeader>
-					<CardTitle>Workflow Templates</CardTitle>
+					<CardTitle>
+						{isTemplatesMode ? 'Workflow Templates' : 'Workflow Runner'}
+					</CardTitle>
 					<CardDescription>
-						Save reusable template workflows, inspect dry-run previews, and execute
-						with step-level retry policy.
+						{isTemplatesMode
+							? 'Create, update, and retire reusable workflow templates.'
+							: 'Run workflow templates against the selected connection with dry-run and retry controls.'}
 					</CardDescription>
 				</CardHeader>
-				<CardContent className='space-y-3'>
-					<div className='space-y-1.5'>
-						<Label htmlFor='workflow-template-select'>Template</Label>
+				<CardContent className="space-y-3">
+					<div className="space-y-1.5">
+						<Label htmlFor="workflow-template-select">Template</Label>
 						<select
-							id='workflow-template-select'
-							className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
+							id="workflow-template-select"
+							className="border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs"
 							value={selectedTemplateId}
 							onChange={(event) => {
 								const nextId = event.target.value
@@ -397,7 +438,7 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
 								}
 							}}
 						>
-							<option value='inline'>Inline template</option>
+							<option value="inline">Inline template</option>
 							{(templatesQuery.data ?? []).map((template) => (
 								<option key={template.id} value={template.id}>
 									{template.name}
@@ -407,89 +448,107 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
 						</select>
 					</div>
 
-					<div className='grid gap-3 md:grid-cols-2'>
-						<div className='space-y-1.5'>
-							<Label htmlFor='workflow-template-name'>Template Name</Label>
+					<div className="grid gap-3 md:grid-cols-2">
+						<div className="space-y-1.5">
+							<Label htmlFor="workflow-template-name">Template Name</Label>
 							<Input
-								id='workflow-template-name'
+								id="workflow-template-name"
 								value={templateName}
 								onChange={(event) => setTemplateName(event.target.value)}
 							/>
 						</div>
 
-						<div className='space-y-1.5'>
-							<Label htmlFor='workflow-template-kind'>Template Kind</Label>
+						<div className="space-y-1.5">
+							<Label htmlFor="workflow-template-kind">Template Kind</Label>
 							<select
-								id='workflow-template-kind'
-								className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
+								id="workflow-template-kind"
+								className="border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs"
 								value={templateKind}
 								onChange={(event) =>
-									setTemplateKind(event.target.value as WorkflowTemplateDraft['kind'])
+									setTemplateKind(
+										event.target.value as WorkflowTemplateDraft['kind'],
+									)
 								}
 							>
-								<option value='deleteByPattern'>Delete by pattern</option>
-								<option value='ttlNormalize'>TTL normalize</option>
-								<option value='warmupSet'>Warmup set</option>
+								<option value="deleteByPattern">Delete by pattern</option>
+								<option value="ttlNormalize">TTL normalize</option>
+								<option value="warmupSet">Warmup set</option>
 							</select>
 						</div>
 					</div>
 
-					<div className='space-y-1.5'>
-						<Label htmlFor='workflow-template-parameters'>Parameters (JSON)</Label>
+					<div className="space-y-1.5">
+						<Label htmlFor="workflow-template-parameters">
+							Parameters (JSON)
+						</Label>
 						<Textarea
-							id='workflow-template-parameters'
-							className='min-h-32 font-mono'
+							id="workflow-template-parameters"
+							className="min-h-32 font-mono"
 							value={templateParametersText}
-							onChange={(event) => setTemplateParametersText(event.target.value)}
+							onChange={(event) =>
+								setTemplateParametersText(event.target.value)
+							}
 						/>
 					</div>
 
-					<div className='grid gap-3 md:grid-cols-2'>
-						<div className='space-y-1.5'>
-							<Label htmlFor='workflow-retry-max'>Retry max attempts</Label>
-							<Input
-								id='workflow-retry-max'
-								value={retryMaxAttempts}
-								onChange={(event) => setRetryMaxAttempts(event.target.value)}
-							/>
-						</div>
+					{isConnectionMode && (
+						<div className="grid gap-3 md:grid-cols-2">
+							<div className="space-y-1.5">
+								<Label htmlFor="workflow-retry-max">Retry max attempts</Label>
+								<Input
+									id="workflow-retry-max"
+									value={retryMaxAttempts}
+									onChange={(event) => setRetryMaxAttempts(event.target.value)}
+								/>
+							</div>
 
-						<div className='space-y-1.5'>
-							<Label htmlFor='workflow-retry-backoff'>Retry backoff (ms)</Label>
-							<Input
-								id='workflow-retry-backoff'
-								value={retryBackoffMs}
-								onChange={(event) => setRetryBackoffMs(event.target.value)}
-							/>
-						</div>
+							<div className="space-y-1.5">
+								<Label htmlFor="workflow-retry-backoff">
+									Retry backoff (ms)
+								</Label>
+								<Input
+									id="workflow-retry-backoff"
+									value={retryBackoffMs}
+									onChange={(event) => setRetryBackoffMs(event.target.value)}
+								/>
+							</div>
 
-						<div className='space-y-1.5'>
-							<Label htmlFor='workflow-retry-strategy'>Backoff strategy</Label>
-							<select
-								id='workflow-retry-strategy'
-								className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
-								value={retryStrategy}
-								onChange={(event) =>
-									setRetryStrategy(event.target.value as 'fixed' | 'exponential')
-								}
-							>
-								<option value='fixed'>Fixed</option>
-								<option value='exponential'>Exponential</option>
-							</select>
-						</div>
+							<div className="space-y-1.5">
+								<Label htmlFor="workflow-retry-strategy">
+									Backoff strategy
+								</Label>
+								<select
+									id="workflow-retry-strategy"
+									className="border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs"
+									value={retryStrategy}
+									onChange={(event) =>
+										setRetryStrategy(
+											event.target.value as 'fixed' | 'exponential',
+										)
+									}
+								>
+									<option value="fixed">Fixed</option>
+									<option value="exponential">Exponential</option>
+								</select>
+							</div>
 
-						<div className='space-y-1.5'>
-							<Label htmlFor='workflow-retry-abort'>Abort on error rate (0-1)</Label>
-							<Input
-								id='workflow-retry-abort'
-								value={retryAbortOnErrorRate}
-								onChange={(event) => setRetryAbortOnErrorRate(event.target.value)}
-							/>
+							<div className="space-y-1.5">
+								<Label htmlFor="workflow-retry-abort">
+									Abort on error rate (0-1)
+								</Label>
+								<Input
+									id="workflow-retry-abort"
+									value={retryAbortOnErrorRate}
+									onChange={(event) =>
+										setRetryAbortOnErrorRate(event.target.value)
+									}
+								/>
+							</div>
 						</div>
-					</div>
+					)}
 
-					<div className='space-y-2 rounded-none border p-2 text-xs'>
-						<label className='flex items-center gap-2'>
+					<div className="space-y-2 rounded-none border p-2 text-xs">
+						<label className="flex items-center gap-2">
 							<Checkbox
 								checked={requiresApprovalOnProd}
 								onCheckedChange={(checked) =>
@@ -498,15 +557,17 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
 							/>
 							Require explicit approval on prod
 						</label>
-						<label className='flex items-center gap-2'>
+						<label className="flex items-center gap-2">
 							<Checkbox
 								checked={supportsDryRun}
-								onCheckedChange={(checked) => setSupportsDryRun(Boolean(checked))}
+								onCheckedChange={(checked) =>
+									setSupportsDryRun(Boolean(checked))
+								}
 							/>
 							Supports dry-run preview
 						</label>
-						{connection.environment === 'prod' && (
-							<label className='flex items-center gap-2 text-destructive'>
+						{isConnectionMode && connection?.environment === 'prod' && (
+							<label className="flex items-center gap-2 text-destructive">
 								<Checkbox
 									checked={prodGuardrailConfirmed}
 									onCheckedChange={(checked) =>
@@ -518,204 +579,294 @@ export const WorkflowPanel = ({ connection }: WorkflowPanelProps) => {
 						)}
 					</div>
 
-					<div className='flex flex-wrap gap-2'>
-						<Button
-							variant='outline'
-							onClick={() => saveTemplateMutation.mutate()}
-							disabled={isBusy}
-						>
-							Save Template
-						</Button>
-						<Button
-							variant='outline'
-							onClick={() => deleteTemplateMutation.mutate()}
-							disabled={
-								isBusy ||
-								!selectedTemplateId ||
-								selectedTemplateId === 'inline' ||
-								isBuiltinTemplate(selectedTemplateId)
-							}
-						>
-							Delete Template
-						</Button>
-						<Button
-							variant='outline'
-							onClick={() => previewMutation.mutate({ cursor: undefined })}
-							disabled={isBusy}
-						>
-							Preview
-						</Button>
-						<Button
-							variant='outline'
-							onClick={() => executeMutation.mutate(true)}
-							disabled={isBusy}
-						>
-							Dry Run
-						</Button>
-						<Button onClick={() => executeMutation.mutate(false)} disabled={isBusy}>
-							Execute
-						</Button>
+					<div className="flex flex-wrap gap-2">
+						{isTemplatesMode ? (
+							<>
+								<Button
+									variant="outline"
+									onClick={() => saveTemplateMutation.mutate()}
+									disabled={isBusy}
+								>
+									Save Template
+								</Button>
+								<Button
+									variant="outline"
+									onClick={() => {
+										setSelectedTemplateId('inline')
+										hydrateTemplateEditor(createEmptyTemplate())
+									}}
+									disabled={isBusy}
+								>
+									New Template
+								</Button>
+								<Button
+									variant="outline"
+									onClick={() => deleteTemplateMutation.mutate()}
+									disabled={
+										isBusy ||
+										!selectedTemplateId ||
+										selectedTemplateId === 'inline' ||
+										isBuiltinTemplate(selectedTemplateId)
+									}
+								>
+									Delete Template
+								</Button>
+							</>
+						) : (
+							<>
+								<Button
+									variant="outline"
+									onClick={() => previewMutation.mutate({ cursor: undefined })}
+									disabled={isBusy}
+								>
+									Preview
+								</Button>
+								<Button
+									variant="outline"
+									onClick={() => executeMutation.mutate(true)}
+									disabled={isBusy}
+								>
+									Dry Run
+								</Button>
+								<Button
+									onClick={() => executeMutation.mutate(false)}
+									disabled={isBusy}
+								>
+									Execute
+								</Button>
+							</>
+						)}
 					</div>
 				</CardContent>
 			</Card>
 
-			<div className='grid min-h-0 gap-3'>
-				<Card>
-					<CardHeader>
-						<CardTitle>Dry-Run Preview</CardTitle>
-						<CardDescription>
-							Review affected keys before executing the workflow.
-						</CardDescription>
-					</CardHeader>
-					<CardContent className='space-y-3'>
-						{!preview ? (
-							<p className='text-muted-foreground text-xs'>
-								Run preview to inspect estimated changes.
-							</p>
-						) : (
-							<>
-								<div className='flex items-center gap-2 text-xs'>
-									<Badge variant='outline'>{preview.kind}</Badge>
-									<Badge variant='outline'>estimate: {preview.estimatedCount}</Badge>
-									<Badge variant='outline'>page: {preview.items.length}</Badge>
-									{preview.truncated && <Badge variant='destructive'>truncated</Badge>}
-									{preview.nextCursor && (
-										<Badge variant='outline'>cursor: {preview.nextCursor}</Badge>
-									)}
-								</div>
-
-								<div className='max-h-56 overflow-auto border'>
-									<Table>
-										<TableHeader>
-											<TableRow>
-												<TableHead>Action</TableHead>
-												<TableHead>Key</TableHead>
-												<TableHead>Next TTL</TableHead>
-											</TableRow>
-										</TableHeader>
-										<TableBody>
-											{preview.items.slice(0, 50).map((item) => (
-												<TableRow key={`${item.action}-${item.key}`}>
-													<TableCell>{item.action}</TableCell>
-													<TableCell className='max-w-52 truncate'>{item.key}</TableCell>
-													<TableCell>
-														{item.nextTtlSeconds === undefined ? '-' : item.nextTtlSeconds}
-													</TableCell>
-												</TableRow>
-											))}
-										</TableBody>
-									</Table>
-								</div>
-								{preview.nextCursor && (
-									<Button
-										size='sm'
-										variant='outline'
-										onClick={() =>
-											previewMutation.mutate({
-												cursor: preview.nextCursor,
-											})
-										}
-										disabled={previewMutation.isPending}
-									>
-										Load Next Preview Page
-									</Button>
-								)}
-							</>
-						)}
-					</CardContent>
-				</Card>
-
-				<Card className='min-h-0'>
-					<CardHeader>
-						<CardTitle>Execution History</CardTitle>
-						<CardDescription>
-							Rerun previous executions directly or rerun with current parameter edits.
-						</CardDescription>
-					</CardHeader>
-					<CardContent className='max-h-72 overflow-auto'>
-						{executionsQuery.isLoading ? (
-							<p className='text-muted-foreground text-xs'>Loading executions...</p>
-						) : (executionsQuery.data?.length ?? 0) === 0 ? (
-							<p className='text-muted-foreground text-xs'>
-								No workflow executions yet.
-							</p>
-						) : (
-							<div className='space-y-2'>
-								{executionsQuery.data?.map((execution) => (
-									<div key={execution.id} className='space-y-2 border p-2 text-xs'>
-										<div className='flex items-center justify-between gap-2'>
-											<div className='min-w-0'>
-												<p className='truncate font-medium'>{execution.workflowName}</p>
-												<p className='text-muted-foreground truncate'>
-													{new Date(execution.startedAt).toLocaleString()}
-												</p>
-											</div>
-											<Badge variant={getStatusBadgeVariant(execution.status)}>
-												{execution.status}
-											</Badge>
-										</div>
-										<div className='text-muted-foreground flex items-center gap-2'>
-											<span>steps: {execution.stepResults.length}</span>
-											<span>retries: {execution.retryCount}</span>
-											{execution.dryRun && <span>dry-run</span>}
-											{execution.policyPackId && (
-												<span>policy: {execution.policyPackId}</span>
-											)}
-											{execution.scheduleWindowId && (
-												<span>window: {execution.scheduleWindowId}</span>
-											)}
-											{execution.checkpointToken && (
-												<span>checkpoint: {execution.checkpointToken}</span>
-											)}
-										</div>
-										{execution.errorMessage && (
-											<p className='text-muted-foreground'>{execution.errorMessage}</p>
+			{isConnectionMode ? (
+				<div className="grid min-h-0 gap-3">
+					<Card>
+						<CardHeader>
+							<CardTitle>Dry-Run Preview</CardTitle>
+							<CardDescription>
+								Review affected keys before executing the workflow.
+							</CardDescription>
+						</CardHeader>
+						<CardContent className="space-y-3">
+							{!preview ? (
+								<p className="text-muted-foreground text-xs">
+									Run preview to inspect estimated changes.
+								</p>
+							) : (
+								<>
+									<div className="flex items-center gap-2 text-xs">
+										<Badge variant="outline">{preview.kind}</Badge>
+										<Badge variant="outline">
+											estimate: {preview.estimatedCount}
+										</Badge>
+										<Badge variant="outline">
+											page: {preview.items.length}
+										</Badge>
+										{preview.truncated && (
+											<Badge variant="destructive">truncated</Badge>
 										)}
-										<div className='flex flex-wrap gap-2'>
-											<Button
-												size='sm'
-												variant='outline'
-												onClick={() =>
-													rerunMutation.mutate({
-														executionId: execution.id,
-														withEdits: false,
-													})
-												}
-												disabled={isBusy}
-											>
-												Rerun
-											</Button>
-											<Button
-												size='sm'
-												variant='outline'
-												onClick={() =>
-													rerunMutation.mutate({
-														executionId: execution.id,
-														withEdits: true,
-													})
-												}
-												disabled={isBusy}
-											>
-												Rerun With Edits
-											</Button>
-											{execution.checkpointToken && execution.status !== 'success' && (
+										{preview.nextCursor && (
+											<Badge variant="outline">
+												cursor: {preview.nextCursor}
+											</Badge>
+										)}
+									</div>
+
+									<div className="max-h-56 overflow-auto border">
+										<Table>
+											<TableHeader>
+												<TableRow>
+													<TableHead>Action</TableHead>
+													<TableHead>Key</TableHead>
+													<TableHead>Next TTL</TableHead>
+												</TableRow>
+											</TableHeader>
+											<TableBody>
+												{preview.items.slice(0, 50).map((item) => (
+													<TableRow key={`${item.action}-${item.key}`}>
+														<TableCell>{item.action}</TableCell>
+														<TableCell className="max-w-52 truncate">
+															{item.key}
+														</TableCell>
+														<TableCell>
+															{item.nextTtlSeconds === undefined
+																? '-'
+																: item.nextTtlSeconds}
+														</TableCell>
+													</TableRow>
+												))}
+											</TableBody>
+										</Table>
+									</div>
+									{preview.nextCursor && (
+										<Button
+											size="sm"
+											variant="outline"
+											onClick={() =>
+												previewMutation.mutate({
+													cursor: preview.nextCursor,
+												})
+											}
+											disabled={previewMutation.isPending}
+										>
+											Load Next Preview Page
+										</Button>
+									)}
+								</>
+							)}
+						</CardContent>
+					</Card>
+
+					<Card className="min-h-0">
+						<CardHeader>
+							<CardTitle>Execution History</CardTitle>
+							<CardDescription>
+								Rerun previous executions directly or rerun with current
+								parameter edits.
+							</CardDescription>
+						</CardHeader>
+						<CardContent className="max-h-72 overflow-auto">
+							{executionsQuery.isLoading ? (
+								<p className="text-muted-foreground text-xs">
+									Loading executions...
+								</p>
+							) : (executionsQuery.data?.length ?? 0) === 0 ? (
+								<p className="text-muted-foreground text-xs">
+									No workflow executions yet.
+								</p>
+							) : (
+								<div className="space-y-2">
+									{executionsQuery.data?.map((execution) => (
+										<div
+											key={execution.id}
+											className="space-y-2 border p-2 text-xs"
+										>
+											<div className="flex items-center justify-between gap-2">
+												<div className="min-w-0">
+													<p className="truncate font-medium">
+														{execution.workflowName}
+													</p>
+													<p className="text-muted-foreground truncate">
+														{new Date(execution.startedAt).toLocaleString()}
+													</p>
+												</div>
+												<Badge
+													variant={getStatusBadgeVariant(execution.status)}
+												>
+													{execution.status}
+												</Badge>
+											</div>
+											<div className="text-muted-foreground flex items-center gap-2">
+												<span>steps: {execution.stepResults.length}</span>
+												<span>retries: {execution.retryCount}</span>
+												{execution.dryRun && <span>dry-run</span>}
+												{execution.policyPackId && (
+													<span>policy: {execution.policyPackId}</span>
+												)}
+												{execution.scheduleWindowId && (
+													<span>window: {execution.scheduleWindowId}</span>
+												)}
+												{execution.checkpointToken && (
+													<span>checkpoint: {execution.checkpointToken}</span>
+												)}
+											</div>
+											{execution.errorMessage && (
+												<p className="text-muted-foreground">
+													{execution.errorMessage}
+												</p>
+											)}
+											<div className="flex flex-wrap gap-2">
 												<Button
-													size='sm'
-													variant='outline'
-													onClick={() => resumeMutation.mutate(execution.id)}
+													size="sm"
+													variant="outline"
+													onClick={() =>
+														rerunMutation.mutate({
+															executionId: execution.id,
+															withEdits: false,
+														})
+													}
 													disabled={isBusy}
 												>
-													Resume From Checkpoint
+													Rerun
 												</Button>
-											)}
+												<Button
+													size="sm"
+													variant="outline"
+													onClick={() =>
+														rerunMutation.mutate({
+															executionId: execution.id,
+															withEdits: true,
+														})
+													}
+													disabled={isBusy}
+												>
+													Rerun With Edits
+												</Button>
+												{execution.checkpointToken &&
+													execution.status !== 'success' && (
+														<Button
+															size="sm"
+															variant="outline"
+															onClick={() =>
+																resumeMutation.mutate(execution.id)
+															}
+															disabled={isBusy}
+														>
+															Resume From Checkpoint
+														</Button>
+													)}
+											</div>
 										</div>
+									))}
+								</div>
+							)}
+						</CardContent>
+					</Card>
+				</div>
+			) : (
+				<Card className="min-h-0">
+					<CardHeader>
+						<CardTitle>Saved Templates</CardTitle>
+						<CardDescription>
+							Inspect current templates and choose one to edit.
+						</CardDescription>
+					</CardHeader>
+					<CardContent className="max-h-[32rem] space-y-2 overflow-auto">
+						{templatesQuery.isLoading ? (
+							<p className="text-muted-foreground text-xs">
+								Loading templates...
+							</p>
+						) : (templatesQuery.data?.length ?? 0) === 0 ? (
+							<p className="text-muted-foreground text-xs">
+								No workflow templates have been saved yet.
+							</p>
+						) : (
+							(templatesQuery.data ?? []).map((template) => (
+								<button
+									key={template.id}
+									type="button"
+									className="w-full space-y-1 border p-2 text-left text-xs hover:bg-muted/40"
+									onClick={() => {
+										setSelectedTemplateId(template.id)
+										hydrateTemplateEditor(template)
+									}}
+								>
+									<div className="flex items-center justify-between gap-2">
+										<p className="truncate font-medium">{template.name}</p>
+										<Badge variant="outline">{template.kind}</Badge>
 									</div>
-								))}
-							</div>
+									<p className="text-muted-foreground truncate">
+										id: {template.id}
+										{isBuiltinTemplate(template.id) ? ' (built-in)' : ''}
+									</p>
+								</button>
+							))
 						)}
 					</CardContent>
 				</Card>
-			</div>
+			)}
 		</div>
 	)
 }

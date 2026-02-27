@@ -32,7 +32,8 @@ import type {
 } from '@/shared/contracts/cache'
 
 type GovernancePanelProps = {
-	connection: ConnectionProfile
+	connection?: ConnectionProfile | null
+	mode?: 'connection' | 'admin'
 }
 
 type PolicyPackFormState = {
@@ -195,8 +196,14 @@ const createRetentionDrafts = (
 	}
 }
 
-export const GovernancePanel = ({ connection }: GovernancePanelProps) => {
+export const GovernancePanel = ({
+	connection = null,
+	mode = 'connection',
+}: GovernancePanelProps) => {
 	const queryClient = useQueryClient()
+	const isConnectionMode = mode === 'connection'
+	const isAdminMode = mode === 'admin'
+	const connectionId = connection?.id ?? null
 
 	const [editingPolicyPackId, setEditingPolicyPackId] = React.useState<
 		string | null
@@ -274,40 +281,51 @@ export const GovernancePanel = ({ connection }: GovernancePanelProps) => {
 	})
 
 	const assignmentsQuery = useQuery({
-		queryKey: ['policy-pack-assignments', connection.id],
+		queryKey: ['policy-pack-assignments', connectionId],
+		enabled: isConnectionMode && Boolean(connectionId),
 		queryFn: async () =>
 			unwrapResponse(
 				await window.speichr.listPolicyPackAssignments({
-					connectionId: connection.id,
+					connectionId: connectionId ?? '',
 				}),
 			),
 	})
 
 	const retentionPoliciesQuery = useQuery({
 		queryKey: ['retention-policies'],
+		enabled: isAdminMode,
 		queryFn: async () =>
 			unwrapResponse(await window.speichr.listRetentionPolicies()),
 	})
 
 	const storageSummaryQuery = useQuery({
 		queryKey: ['storage-summary'],
+		enabled: isAdminMode,
 		queryFn: async () => unwrapResponse(await window.speichr.getStorageSummary()),
 	})
 
 	React.useEffect(() => {
+		if (!isConnectionMode) {
+			return
+		}
+
 		const assignment = assignmentsQuery.data?.[0]
 		setSelectedAssignedPolicyPackId(assignment?.policyPackId ?? 'none')
-	}, [assignmentsQuery.data])
+	}, [assignmentsQuery.data, isConnectionMode])
 
 	React.useEffect(() => {
+		if (!isAdminMode) {
+			return
+		}
+
 		if (!retentionPoliciesQuery.data?.policies) {
 			return
 		}
 
-		setRetentionDrafts(
-			createRetentionDrafts(retentionPoliciesQuery.data.policies),
-		)
-	}, [retentionPoliciesQuery.data])
+			setRetentionDrafts(
+				createRetentionDrafts(retentionPoliciesQuery.data.policies),
+			)
+	}, [retentionPoliciesQuery.data, isAdminMode])
 
 	const savePolicyPackMutation = useMutation({
 		mutationFn: async () => {
@@ -344,15 +362,17 @@ export const GovernancePanel = ({ connection }: GovernancePanelProps) => {
 	const deletePolicyPackMutation = useMutation({
 		mutationFn: async (id: string) =>
 			unwrapResponse(await window.speichr.deletePolicyPack({ id })),
-		onSuccess: async () => {
-			setEditingPolicyPackId(null)
-			setPolicyPackForm(defaultPolicyPackFormState)
-			toast.success('Governance policy pack deleted.')
-			await queryClient.invalidateQueries({ queryKey: ['policy-packs'] })
-			await queryClient.invalidateQueries({
-				queryKey: ['policy-pack-assignments', connection.id],
-			})
-		},
+			onSuccess: async () => {
+				setEditingPolicyPackId(null)
+				setPolicyPackForm(defaultPolicyPackFormState)
+				toast.success('Governance policy pack deleted.')
+				await queryClient.invalidateQueries({ queryKey: ['policy-packs'] })
+				if (connectionId) {
+					await queryClient.invalidateQueries({
+						queryKey: ['policy-pack-assignments', connectionId],
+					})
+				}
+			},
 		onError: (error) => {
 			toast.error(
 				error instanceof Error ? error.message : 'Unable to delete policy pack.',
@@ -361,21 +381,28 @@ export const GovernancePanel = ({ connection }: GovernancePanelProps) => {
 	})
 
 	const assignPolicyPackMutation = useMutation({
-		mutationFn: async () =>
-			unwrapResponse(
+		mutationFn: async () => {
+			if (!connectionId) {
+				throw new Error('Select a connection first.')
+			}
+
+			return unwrapResponse(
 				await window.speichr.assignPolicyPack({
-					connectionId: connection.id,
+					connectionId,
 					policyPackId:
 						selectedAssignedPolicyPackId === 'none'
 							? undefined
 							: selectedAssignedPolicyPackId,
 				}),
-			),
+			)
+		},
 		onSuccess: async () => {
 			toast.success('Governance assignment updated.')
-			await queryClient.invalidateQueries({
-				queryKey: ['policy-pack-assignments', connection.id],
-			})
+			if (connectionId) {
+				await queryClient.invalidateQueries({
+					queryKey: ['policy-pack-assignments', connectionId],
+				})
+			}
 		},
 		onError: (error) => {
 			toast.error(
@@ -471,7 +498,77 @@ export const GovernancePanel = ({ connection }: GovernancePanelProps) => {
 				error instanceof Error ? error.message : 'Unable to purge retention data.',
 			)
 		},
-	})
+		})
+
+	if (isConnectionMode) {
+		if (!connection) {
+			return (
+				<Card>
+					<CardContent className='p-4 text-xs text-muted-foreground'>
+						Select a connection to manage governance assignment.
+					</CardContent>
+				</Card>
+			)
+		}
+
+		return (
+			<Card className='max-w-2xl'>
+				<CardHeader>
+					<CardTitle>Connection Governance Assignment</CardTitle>
+					<CardDescription>
+						Choose which policy pack applies to the active connection.
+					</CardDescription>
+				</CardHeader>
+				<CardContent className='space-y-3'>
+					<p className='text-xs'>
+						<span className='font-medium'>Connection:</span> {connection.name}
+					</p>
+					<select
+						className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
+						value={selectedAssignedPolicyPackId}
+						onChange={(event) => setSelectedAssignedPolicyPackId(event.target.value)}
+					>
+						<option value='none'>No policy pack assigned</option>
+						{(policyPacksQuery.data ?? []).map((policyPack) => (
+							<option key={policyPack.id} value={policyPack.id}>
+								{policyPack.name}
+							</option>
+						))}
+					</select>
+
+					<div className='flex flex-wrap gap-2'>
+						<Button
+							size='sm'
+							variant='outline'
+							onClick={() => assignPolicyPackMutation.mutate()}
+							disabled={assignPolicyPackMutation.isPending}
+						>
+							Apply Assignment
+						</Button>
+						<Button
+							size='sm'
+							variant='outline'
+							onClick={() => {
+								void assignmentsQuery.refetch()
+							}}
+							disabled={assignPolicyPackMutation.isPending}
+						>
+							Refresh
+						</Button>
+					</div>
+
+					{assignmentsQuery.isLoading ? (
+						<p className='text-muted-foreground text-xs'>Loading assignment...</p>
+					) : (
+						<p className='text-muted-foreground text-xs'>
+							Current assignment:{' '}
+							{assignmentsQuery.data?.[0]?.policyPackId ?? 'none'}
+						</p>
+					)}
+				</CardContent>
+			</Card>
+		)
+	}
 
 	return (
 		<div className='grid min-h-0 gap-3 xl:grid-cols-2'>
@@ -654,33 +751,7 @@ export const GovernancePanel = ({ connection }: GovernancePanelProps) => {
 						</Button>
 					</div>
 
-					<div className='space-y-2 rounded-none border p-2 text-xs'>
-						<p className='font-medium'>
-							Assignment For Connection: {connection.name}
-						</p>
-						<select
-							className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
-							value={selectedAssignedPolicyPackId}
-							onChange={(event) => setSelectedAssignedPolicyPackId(event.target.value)}
-						>
-							<option value='none'>No policy pack assigned</option>
-							{(policyPacksQuery.data ?? []).map((policyPack) => (
-								<option key={policyPack.id} value={policyPack.id}>
-									{policyPack.name}
-								</option>
-							))}
-						</select>
-						<Button
-							size='sm'
-							variant='outline'
-							onClick={() => assignPolicyPackMutation.mutate()}
-							disabled={assignPolicyPackMutation.isPending}
-						>
-							Apply Assignment
-						</Button>
-					</div>
-
-					<div className='max-h-56 space-y-2 overflow-auto border p-2'>
+						<div className='max-h-56 space-y-2 overflow-auto border p-2'>
 						{(policyPacksQuery.data?.length ?? 0) === 0 ? (
 							<p className='text-muted-foreground text-xs'>
 								No governance policy packs configured.
