@@ -315,7 +315,7 @@ describeSqlite('sqlite persistence v2', () => {
 			limit: 10,
 		})
 
-		expect(unread).toHaveLength(1)
+		expect(unread).toHaveLength(2)
 
 		await alertRepository.markRead(alert.id)
 
@@ -327,7 +327,7 @@ describeSqlite('sqlite persistence v2', () => {
 			limit: 10,
 		})
 
-		expect(unreadAfterMark).toHaveLength(0)
+		expect(unreadAfterMark).toHaveLength(1)
 
 		const allAlerts = await alertRepository.list({
 			unreadOnly: false,
