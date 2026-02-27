@@ -9,7 +9,6 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from '@/renderer/components/ui/dialog'
-import { Switch } from '@/renderer/components/ui/switch'
 
 type SettingsPanelProps = {
 	open: boolean
@@ -57,14 +56,6 @@ export const SettingsPanel = ({ open, onOpenChange }: SettingsPanelProps) => {
 								System
 							</Button>
 						</div>
-					</div>
-
-					<div className='flex items-center justify-between rounded-none border p-2.5 text-xs'>
-						<span>Quick dark mode toggle</span>
-						<Switch
-							checked={isDark}
-							onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')}
-						/>
 					</div>
 				</div>
 
