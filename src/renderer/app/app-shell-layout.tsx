@@ -239,12 +239,21 @@ export const AppShellLayout = () => {
 										{selectedConnection ? (
 											<div className='flex w-full items-start justify-between gap-2'>
 												<div className='min-w-0'>
-													<p className='truncate w-fit font-medium'>
+													<p className='truncate w-fit font-bold'>
 														{selectedConnection.name}
 													</p>
 													<div className='flex items-center gap-1 mt-0.5'>
-														<Badge>{selectedConnection.environment}</Badge>
-														<Badge variant='outline'>
+														<Badge
+															className='text-[11px] px-1.5'
+															variant={
+																selectedConnection.environment === 'prod'
+																	? 'destructive'
+																	: 'default'
+															}
+														>
+															{selectedConnection.environment}
+														</Badge>
+														<Badge variant='outline' className='text-[11px] px-1.5'>
 															{selectedNamespace ? selectedNamespace.name : 'All Data'}
 														</Badge>
 													</div>

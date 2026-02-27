@@ -142,10 +142,6 @@ export interface RetentionRepository {
   getStorageSummary: () => Promise<StorageSummary>
 }
 
-export interface NotificationPublisher {
-  notify: (alert: Pick<AlertEvent, 'title' | 'message'>) => Promise<void>
-}
-
 export interface EngineTimelineEventInput {
   timestamp?: string
   connectionId: string

@@ -433,7 +433,7 @@ export const AlertsPanel = ({ connection }: AlertsPanelProps) => {
 						<div>
 							<CardTitle>Alerts</CardTitle>
 							<CardDescription>
-								In-app alert feed with desktop notification parity.
+								In-app alert feed.
 							</CardDescription>
 						</div>
 						<label className='flex items-center gap-2 text-xs'>

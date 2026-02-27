@@ -111,7 +111,6 @@ import type {
 	IncidentBundleRepository,
 	MemcachedKeyIndexRepository,
 	NamespaceRepository,
-	NotificationPublisher,
 	ObservabilityRepository,
 	RetentionRepository,
 	SecretStore,
@@ -188,7 +187,6 @@ type ServiceDependencies = {
 	governanceAssignmentRepository: GovernanceAssignmentRepository
 	incidentBundleRepository: IncidentBundleRepository
 	retentionRepository: RetentionRepository
-	notificationPublisher: NotificationPublisher
 	engineEventIngestor: EngineEventIngestor
 	namespaceRepository: NamespaceRepository
 }
@@ -610,14 +608,6 @@ class InMemoryRetentionRepository implements RetentionRepository {
 	}
 }
 
-class NoopNotificationPublisher implements NotificationPublisher {
-	public async notify(
-		alert: Pick<AlertEvent, 'title' | 'message'>,
-	): Promise<void> {
-		void alert
-	}
-}
-
 class NoopEngineEventIngestor implements EngineEventIngestor {
 	public async start(args: {
 		onEvent: (event: EngineTimelineEventInput) => Promise<void>
@@ -652,8 +642,6 @@ export class SpeichrService {
 	private readonly incidentBundleRepository: IncidentBundleRepository
 
 	private readonly retentionRepository: RetentionRepository
-
-	private readonly notificationPublisher: NotificationPublisher
 
 	private readonly engineEventIngestor: EngineEventIngestor
 
@@ -705,8 +693,6 @@ export class SpeichrService {
 			new InMemoryIncidentBundleRepository()
 		this.retentionRepository =
 			dependencies?.retentionRepository ?? new InMemoryRetentionRepository()
-		this.notificationPublisher =
-			dependencies?.notificationPublisher ?? new NoopNotificationPublisher()
 		this.engineEventIngestor =
 			dependencies?.engineEventIngestor ?? new NoopEngineEventIngestor()
 		this.namespaceRepository =
@@ -3877,10 +3863,6 @@ export class SpeichrService {
 		}
 
 		await this.alertRepository.append(event)
-		await this.notificationPublisher.notify({
-			title: event.title,
-			message: event.message,
-		})
 	}
 
 	private async resolveWorkflowTemplate(args: {

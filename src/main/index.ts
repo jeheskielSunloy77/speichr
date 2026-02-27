@@ -5,7 +5,6 @@ import { app, BrowserWindow } from 'electron'
 import started from 'electron-squirrel-startup'
 
 import { SpeichrService } from './application/speichr-service'
-import { DesktopNotificationPublisher } from './infrastructure/notifications/desktop-notification-publisher'
 import { DefaultCacheGateway } from './infrastructure/providers/cache-gateway'
 import { ProviderEngineEventIngestor } from './infrastructure/providers/provider-engine-event-ingestor'
 import { InMemorySecretStore } from './infrastructure/secrets/in-memory-secret-store'
@@ -85,7 +84,6 @@ const initializeRuntime = (): RuntimeContext => {
 		secretStore,
 		cacheGateway,
 	)
-	const notificationPublisher = new DesktopNotificationPublisher()
 
 	const service = new SpeichrService(
 		connectionRepository,
@@ -104,7 +102,6 @@ const initializeRuntime = (): RuntimeContext => {
 			governanceAssignmentRepository,
 			incidentBundleRepository,
 			retentionRepository,
-			notificationPublisher,
 			engineEventIngestor,
 			namespaceRepository,
 		},
