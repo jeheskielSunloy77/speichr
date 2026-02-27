@@ -8,7 +8,9 @@ import { v4 as uuidv4 } from 'uuid'
 import type {
 	AlertEvent,
 	AlertListRequest,
+	AlertMarkAllReadRequest,
 	AlertMarkReadRequest,
+	AlertUnreadCountResult,
 	AlertRule,
 	AlertRuleCreateRequest,
 	AlertRuleDeleteRequest,
@@ -387,6 +389,10 @@ class InMemoryAlertRepository implements AlertRepository {
 			.slice(0, request.limit)
 	}
 
+	public async countUnread(): Promise<number> {
+		return Array.from(this.events.values()).filter((event) => !event.read).length
+	}
+
 	public async markRead(id: string): Promise<void> {
 		const event = this.events.get(id)
 		if (!event) {
@@ -397,6 +403,19 @@ class InMemoryAlertRepository implements AlertRepository {
 			...event,
 			read: true,
 		})
+	}
+
+	public async markAllRead(): Promise<void> {
+		for (const [id, event] of this.events.entries()) {
+			if (event.read) {
+				continue
+			}
+
+			this.events.set(id, {
+				...event,
+				read: true,
+			})
+		}
 	}
 }
 
@@ -1511,10 +1530,27 @@ export class SpeichrService {
 		return this.alertRepository.list(payload)
 	}
 
+	public async getUnreadAlertCount(): Promise<AlertUnreadCountResult> {
+		return {
+			unreadCount: await this.alertRepository.countUnread(),
+		}
+	}
+
 	public async markAlertRead(
 		payload: AlertMarkReadRequest,
 	): Promise<MutationResult> {
 		await this.alertRepository.markRead(payload.id)
+
+		return {
+			success: true,
+		}
+	}
+
+	public async markAllAlertsRead(
+		payload: AlertMarkAllReadRequest,
+	): Promise<MutationResult> {
+		void payload
+		await this.alertRepository.markAllRead()
 
 		return {
 			success: true,

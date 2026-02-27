@@ -674,6 +674,55 @@ describe('SpeichrService', () => {
 		expect(alerts[0].source).toBe('policy')
 	})
 
+	it('reports unread alert counts and supports mark-all-read', async () => {
+		const repository = new InMemoryConnectionRepository()
+		const secretStore = new InMemorySecretStore()
+		const memcachedIndex = new InMemoryMemcachedIndexRepository()
+		const gateway = createGatewayMock()
+
+		const profile: ConnectionProfile = {
+			...createStoredProfile(),
+			id: 'alert-count-1',
+			secretRef: 'alert-count-1',
+			forceReadOnly: true,
+		}
+
+		await repository.save(profile)
+		await secretStore.saveSecret(profile.id, { password: 'secret' })
+
+		const service = new SpeichrService(
+			repository,
+			secretStore,
+			memcachedIndex,
+			gateway,
+		)
+
+		await expect(
+			service.setKey({
+				connectionId: profile.id,
+				key: 'alert:key:1',
+				value: 'value',
+			}),
+		).rejects.toBeInstanceOf(OperationFailure)
+		await expect(
+			service.setKey({
+				connectionId: profile.id,
+				key: 'alert:key:2',
+				value: 'value',
+			}),
+		).rejects.toBeInstanceOf(OperationFailure)
+
+		const unreadCount = await service.getUnreadAlertCount()
+		expect(unreadCount.unreadCount).toBeGreaterThanOrEqual(2)
+
+		await expect(service.markAllAlertsRead({})).resolves.toEqual({
+			success: true,
+		})
+
+		const unreadAfterMarkAll = await service.getUnreadAlertCount()
+		expect(unreadAfterMarkAll.unreadCount).toBe(0)
+	})
+
 	it('supports alert rule CRUD and emits rule-triggered alerts', async () => {
 		const repository = new InMemoryConnectionRepository()
 		const secretStore = new InMemorySecretStore()

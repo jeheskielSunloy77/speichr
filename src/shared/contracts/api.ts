@@ -178,9 +178,15 @@ export interface SpeichrApi {
 	listAlerts: (
 		payload: AlertListRequest,
 	) => Promise<IpcResponseEnvelope<QueryResultMap['alert.list']>>
+	getUnreadAlertCount: () => Promise<
+		IpcResponseEnvelope<QueryResultMap['alert.unread.count']>
+	>
 	markAlertRead: (
 		payload: AlertMarkReadRequest,
 	) => Promise<IpcResponseEnvelope<CommandResultMap['alert.markRead']>>
+	markAllAlertsRead: () => Promise<
+		IpcResponseEnvelope<CommandResultMap['alert.markAllRead']>
+	>
 	listAlertRules: () => Promise<
 		IpcResponseEnvelope<QueryResultMap['alert.rule.list']>
 	>

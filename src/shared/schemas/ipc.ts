@@ -476,6 +476,10 @@ const alertMarkReadPayloadSchema = z
   })
   .strict()
 
+const alertMarkAllReadPayloadSchema = z.object({}).strict()
+
+const alertUnreadCountPayloadSchema = z.object({}).strict()
+
 const governanceAssignmentListPayloadSchema = z
   .object({
     connectionId: idSchema.optional(),
@@ -584,6 +588,13 @@ export const commandEnvelopeSchema = z.discriminatedUnion('command', [
     .object({
       command: z.literal('alert.markRead'),
       payload: alertMarkReadPayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal('alert.markAllRead'),
+      payload: alertMarkAllReadPayloadSchema,
       correlationId: correlationIdSchema,
     })
     .strict(),
@@ -797,6 +808,13 @@ export const queryEnvelopeSchema = z.discriminatedUnion('query', [
     .object({
       query: z.literal('alert.list'),
       payload: alertListPayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      query: z.literal('alert.unread.count'),
+      payload: alertUnreadCountPayloadSchema,
       correlationId: correlationIdSchema,
     })
     .strict(),

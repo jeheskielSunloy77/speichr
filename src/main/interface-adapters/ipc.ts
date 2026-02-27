@@ -93,6 +93,8 @@ const handleCommand = async (
 			return service.resumeWorkflow(envelope.payload)
 		case 'alert.markRead':
 			return service.markAlertRead(envelope.payload)
+		case 'alert.markAllRead':
+			return service.markAllAlertsRead(envelope.payload)
 		case 'alert.rule.create':
 			return service.createAlertRule(envelope.payload)
 		case 'alert.rule.update':
@@ -163,6 +165,8 @@ const handleQuery = async (
 			return service.comparePeriods(envelope.payload)
 		case 'alert.list':
 			return service.listAlerts(envelope.payload)
+		case 'alert.unread.count':
+			return service.getUnreadAlertCount()
 		case 'alert.rule.list':
 			return service.listAlertRules()
 		case 'policy.pack.list':

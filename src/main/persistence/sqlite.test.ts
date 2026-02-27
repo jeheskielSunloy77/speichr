@@ -302,6 +302,13 @@ describeSqlite('sqlite persistence v2', () => {
 		}
 
 		await alertRepository.append(alert)
+		await alertRepository.append({
+			...alert,
+			id: 'alert-2',
+		})
+
+		const unreadCountBefore = await alertRepository.countUnread()
+		expect(unreadCountBefore).toBe(2)
 
 		const unread = await alertRepository.list({
 			unreadOnly: true,
@@ -311,6 +318,9 @@ describeSqlite('sqlite persistence v2', () => {
 		expect(unread).toHaveLength(1)
 
 		await alertRepository.markRead(alert.id)
+
+		const unreadCountAfterSingleRead = await alertRepository.countUnread()
+		expect(unreadCountAfterSingleRead).toBe(1)
 
 		const unreadAfterMark = await alertRepository.list({
 			unreadOnly: true,
@@ -324,7 +334,12 @@ describeSqlite('sqlite persistence v2', () => {
 			limit: 10,
 		})
 
-		expect(allAlerts).toHaveLength(1)
+		expect(allAlerts).toHaveLength(2)
+
+		await alertRepository.markAllRead()
+
+		const unreadCountAfterMarkAll = await alertRepository.countUnread()
+		expect(unreadCountAfterMarkAll).toBe(0)
 	})
 
 	it('stores v3 governance, alert rule, incident, and retention entities', async () => {

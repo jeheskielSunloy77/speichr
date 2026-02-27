@@ -1,7 +1,9 @@
 import type {
 	AlertEvent,
 	AlertListRequest,
+	AlertMarkAllReadRequest,
 	AlertMarkReadRequest,
+	AlertUnreadCountResult,
 	AlertRule,
 	AlertRuleCreateRequest,
 	AlertRuleDeleteRequest,
@@ -92,6 +94,7 @@ export type SpeichrCommand =
 	| 'workflow.rerun'
 	| 'workflow.resume'
 	| 'alert.markRead'
+	| 'alert.markAllRead'
 	| 'alert.rule.create'
 	| 'alert.rule.update'
 	| 'alert.rule.delete'
@@ -124,6 +127,7 @@ export type SpeichrQuery =
 	| 'observability.failedOperations'
 	| 'observability.comparePeriods'
 	| 'alert.list'
+	| 'alert.unread.count'
 	| 'alert.rule.list'
 	| 'policy.pack.list'
 	| 'policy.pack.assignment.list'
@@ -148,6 +152,7 @@ export interface CommandPayloadMap {
 	'workflow.rerun': WorkflowRerunRequest
 	'workflow.resume': WorkflowResumeRequest
 	'alert.markRead': AlertMarkReadRequest
+	'alert.markAllRead': AlertMarkAllReadRequest
 	'alert.rule.create': AlertRuleCreateRequest
 	'alert.rule.update': AlertRuleUpdateRequest
 	'alert.rule.delete': AlertRuleDeleteRequest
@@ -181,6 +186,7 @@ export interface QueryPayloadMap {
 	'observability.failedOperations': FailedOperationDrilldownRequest
 	'observability.comparePeriods': ComparePeriodsRequest
 	'alert.list': AlertListRequest
+	'alert.unread.count': Record<string, never>
 	'alert.rule.list': Record<string, never>
 	'policy.pack.list': Record<string, never>
 	'policy.pack.assignment.list': GovernanceAssignmentListRequest
@@ -206,6 +212,7 @@ export interface CommandResultMap {
 	'workflow.rerun': WorkflowExecutionRecord
 	'workflow.resume': WorkflowExecutionRecord
 	'alert.markRead': MutationResult
+	'alert.markAllRead': MutationResult
 	'alert.rule.create': AlertRule
 	'alert.rule.update': AlertRule
 	'alert.rule.delete': MutationResult
@@ -239,6 +246,7 @@ export interface QueryResultMap {
 	'observability.failedOperations': FailedOperationDrilldownResult
 	'observability.comparePeriods': ComparePeriodsResult
 	'alert.list': AlertEvent[]
+	'alert.unread.count': AlertUnreadCountResult
 	'alert.rule.list': AlertRule[]
 	'policy.pack.list': GovernancePolicyPack[]
 	'policy.pack.assignment.list': GovernanceAssignment[]

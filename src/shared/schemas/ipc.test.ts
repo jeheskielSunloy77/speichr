@@ -135,6 +135,16 @@ describe('commandEnvelopeSchema', () => {
     expect(parsed.command).toBe('incident.bundle.export')
   })
 
+  it('accepts mark-all-alerts-read commands', () => {
+    const parsed = commandEnvelopeSchema.parse({
+      command: 'alert.markAllRead',
+      correlationId: 'alert-all-read-1',
+      payload: {},
+    })
+
+    expect(parsed.command).toBe('alert.markAllRead')
+  })
+
   it('rejects governance policy packs with invalid execution windows', () => {
     expect(() =>
       commandEnvelopeSchema.parse({
@@ -235,6 +245,16 @@ describe('queryEnvelopeSchema', () => {
     })
 
     expect(parsed.query).toBe('alert.list')
+  })
+
+  it('accepts unread alert count queries', () => {
+    const parsed = queryEnvelopeSchema.parse({
+      query: 'alert.unread.count',
+      correlationId: 'xyz-4b',
+      payload: {},
+    })
+
+    expect(parsed.query).toBe('alert.unread.count')
   })
 
   it('accepts compare period queries', () => {

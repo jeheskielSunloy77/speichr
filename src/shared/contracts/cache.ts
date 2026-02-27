@@ -611,6 +611,12 @@ export interface AlertMarkReadRequest {
   id: string
 }
 
+export type AlertMarkAllReadRequest = Record<string, never>
+
+export interface AlertUnreadCountResult {
+  unreadCount: number
+}
+
 export interface AlertRule {
   id: string
   name: string

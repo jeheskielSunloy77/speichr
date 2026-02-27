@@ -98,7 +98,9 @@ export interface ObservabilityRepository {
 export interface AlertRepository {
   append: (event: AlertEvent) => Promise<void>
   list: (request: AlertListRequest) => Promise<AlertEvent[]>
+  countUnread: () => Promise<number>
   markRead: (id: string) => Promise<void>
+  markAllRead: () => Promise<void>
 }
 
 export interface AlertRuleRepository {

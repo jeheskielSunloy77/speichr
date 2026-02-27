@@ -1522,7 +1522,14 @@ export class SqliteAlertRepository implements AlertRepository {
     AlertRow
   >
 
+  private readonly countUnreadStatement: BetterSqlite3.Statement<
+    [],
+    { unread_count: number }
+  >
+
   private readonly markReadStatement: BetterSqlite3.Statement<[string]>
+
+  private readonly markAllReadStatement: BetterSqlite3.Statement<[]>
 
   public constructor(private readonly db: BetterSqlite3.Database) {
     this.insertStatement = this.db.prepare(`
@@ -1556,8 +1563,18 @@ export class SqliteAlertRepository implements AlertRepository {
       LIMIT ?
     `)
 
+    this.countUnreadStatement = this.db.prepare(`
+      SELECT COUNT(*) AS unread_count
+      FROM alert_events
+      WHERE is_read = 0
+    `)
+
     this.markReadStatement = this.db.prepare(
       'UPDATE alert_events SET is_read = 1 WHERE id = ?',
+    )
+
+    this.markAllReadStatement = this.db.prepare(
+      'UPDATE alert_events SET is_read = 1 WHERE is_read = 0',
     )
   }
 
@@ -1582,8 +1599,16 @@ export class SqliteAlertRepository implements AlertRepository {
     return rows.map(rowToAlert)
   }
 
+  public async countUnread(): Promise<number> {
+    return this.countUnreadStatement.get()?.unread_count ?? 0
+  }
+
   public async markRead(id: string): Promise<void> {
     this.markReadStatement.run(id)
+  }
+
+  public async markAllRead(): Promise<void> {
+    this.markAllReadStatement.run()
   }
 }
 

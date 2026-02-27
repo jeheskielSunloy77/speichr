@@ -101,7 +101,9 @@ export const speichrApi: SpeichrApi = {
 	getIncidentBundleExportJob: (payload) =>
 		invokeQuery('incident.bundle.export.job.get', payload),
 	listAlerts: (payload) => invokeQuery('alert.list', payload),
+	getUnreadAlertCount: () => invokeQuery('alert.unread.count', {}),
 	markAlertRead: (payload) => invokeCommand('alert.markRead', payload),
+	markAllAlertsRead: () => invokeCommand('alert.markAllRead', {}),
 	listAlertRules: () => invokeQuery('alert.rule.list', {}),
 	createAlertRule: (payload) => invokeCommand('alert.rule.create', payload),
 	updateAlertRule: (payload) => invokeCommand('alert.rule.update', payload),
