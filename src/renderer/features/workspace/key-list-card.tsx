@@ -1,4 +1,4 @@
-import { RefreshCwIcon, SearchIcon, Trash2Icon } from 'lucide-react'
+import { FilePenLineIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from 'lucide-react'
 
 import { Badge } from '@/renderer/components/ui/badge'
 import { Button } from '@/renderer/components/ui/button'
@@ -22,12 +22,38 @@ type KeyListCardProps = {
 	isRetryableError?: boolean
 	readOnly: boolean
 	hasNextPage: boolean
+	totalKeys?: number
+	totalFoundKeys?: number
+	isCountLoading?: boolean
+	getNamespaceBadge?: (key: string) => string | undefined
 	onSearchPatternChange: (value: string) => void
 	onSelectKey: (key: string) => void
+	onEditKey: (key: string) => void
 	onDeleteKey: (key: string) => void
 	onRefresh: () => void
 	onRetry?: () => void
 	onLoadNextPage: () => void
+}
+
+const renderCountLabel = (
+	searchPattern: string,
+	totalKeys?: number,
+	totalFoundKeys?: number,
+	isCountLoading?: boolean,
+): string => {
+	if (isCountLoading) {
+		return 'Counting keys...'
+	}
+
+	if (typeof totalKeys !== 'number') {
+		return 'Pattern search supports wildcard syntax such as user:*.'
+	}
+
+	if (searchPattern.trim().length > 0 && typeof totalFoundKeys === 'number') {
+		return `Total keys: ${totalKeys} • Found: ${totalFoundKeys}`
+	}
+
+	return `Total keys: ${totalKeys}`
 }
 
 export const KeyListCard = ({
@@ -40,8 +66,13 @@ export const KeyListCard = ({
 	isRetryableError,
 	readOnly,
 	hasNextPage,
+	totalKeys,
+	totalFoundKeys,
+	isCountLoading,
+	getNamespaceBadge,
 	onSearchPatternChange,
 	onSelectKey,
+	onEditKey,
 	onDeleteKey,
 	onRefresh,
 	onRetry,
@@ -54,7 +85,12 @@ export const KeyListCard = ({
 					<div>
 						<CardTitle>{title}</CardTitle>
 						<CardDescription>
-							Pattern search supports wildcard syntax such as <code>user:*</code>.
+							{renderCountLabel(
+								searchPattern,
+								totalKeys,
+								totalFoundKeys,
+								isCountLoading,
+							)}
 						</CardDescription>
 					</div>
 					<Button variant='outline' size='sm' onClick={onRefresh}>
@@ -93,38 +129,57 @@ export const KeyListCard = ({
 							No keys found for this query.
 						</p>
 					) : (
-						keys.map((key) => (
-							<div
-								key={key}
-								className={`group flex items-center justify-between rounded-none border px-2 py-1.5 text-xs ${
-									key === selectedKey
-										? 'border-primary bg-primary/10'
-										: 'hover:bg-muted/50 border-transparent'
-								}`}
-							>
-								<button
-									className='min-w-0 flex-1 truncate text-left'
-									onClick={() => onSelectKey(key)}
-									type='button'
+						keys.map((key) => {
+							const namespaceName = getNamespaceBadge?.(key)
+
+							return (
+								<div
+									key={key}
+									className={`group flex items-center justify-between rounded-none border px-2 py-1.5 text-xs ${
+										key === selectedKey
+											? 'border-primary bg-primary/10'
+											: 'hover:bg-muted/50 border-transparent'
+									}`}
 								>
-									{key}
-								</button>
-								<div className='ml-2 flex items-center gap-2'>
-									{!readOnly ? (
-										<Button
-											variant='ghost'
-											size='icon-xs'
-											className='opacity-0 transition-opacity group-hover:opacity-100'
-											onClick={() => onDeleteKey(key)}
-										>
-											<Trash2Icon className='size-3.5' />
-										</Button>
-									) : (
-										<Badge variant='outline'>RO</Badge>
-									)}
+									<button
+										className='min-w-0 flex-1 truncate text-left'
+										onClick={() => onSelectKey(key)}
+										type='button'
+									>
+										<span className='truncate'>{key}</span>
+										{namespaceName && (
+											<Badge className='ml-2' variant='outline'>
+												{namespaceName}
+											</Badge>
+										)}
+									</button>
+									<div className='ml-2 flex items-center gap-2'>
+										{!readOnly ? (
+											<>
+												<Button
+													variant='ghost'
+													size='icon-xs'
+													className='opacity-0 transition-opacity group-hover:opacity-100'
+													onClick={() => onEditKey(key)}
+												>
+													<FilePenLineIcon className='size-3.5' />
+												</Button>
+												<Button
+													variant='ghost'
+													size='icon-xs'
+													className='opacity-0 transition-opacity group-hover:opacity-100'
+													onClick={() => onDeleteKey(key)}
+												>
+													<Trash2Icon className='size-3.5' />
+												</Button>
+											</>
+										) : (
+											<Badge variant='outline'>RO</Badge>
+										)}
+									</div>
 								</div>
-							</div>
-						))
+							)
+						})
 					)}
 				</div>
 

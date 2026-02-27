@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { PlusIcon } from 'lucide-react'
 import * as React from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -25,6 +26,11 @@ import {
 	DialogTitle,
 } from '@/renderer/components/ui/dialog'
 import {
+	ResizableHandle,
+	ResizablePanel,
+	ResizablePanelGroup,
+} from '@/renderer/components/ui/resizable'
+import {
 	Tabs,
 	TabsContent,
 	TabsList,
@@ -39,6 +45,8 @@ import { ObservabilityPanel } from '@/renderer/features/observability/observabil
 import { WorkflowPanel } from '@/renderer/features/workflows/workflow-panel'
 import { KeyDetailCard } from '@/renderer/features/workspace/key-detail-card'
 import { KeyListCard } from '@/renderer/features/workspace/key-list-card'
+import { KeyUpsertDialog } from '@/renderer/features/workspace/key-upsert-dialog'
+import { useIsMobile } from '@/renderer/hooks/use-mobile'
 import { useUiStore } from '@/renderer/state/ui-store'
 import type {
 	KeyListResult,
@@ -48,12 +56,9 @@ import type {
 } from '@/shared/contracts/cache'
 
 const DEFAULT_PAGE_SIZE = 100
+const WORKSPACE_PANEL_LAYOUT_STORAGE_KEY = 'workspace-key-panels-layout-v1'
 
-type WorkspaceTab =
-	| 'workspace'
-	| 'workflows'
-	| 'observability'
-	| 'governance'
+type WorkspaceTab = 'workspace' | 'workflows' | 'observability' | 'governance'
 
 const isWorkspaceTab = (value: string | null): value is WorkspaceTab =>
 	value === 'workspace' ||
@@ -105,9 +110,45 @@ const getQueryErrorState = (error: unknown): QueryErrorState | undefined => {
 	}
 }
 
+const readWorkspacePanelLayout = (): { left: number; right: number } => {
+	if (typeof window === 'undefined') {
+		return { left: 60, right: 40 }
+	}
+
+	const serializedLayout = window.localStorage.getItem(
+		WORKSPACE_PANEL_LAYOUT_STORAGE_KEY,
+	)
+	if (!serializedLayout) {
+		return { left: 60, right: 40 }
+	}
+
+	try {
+		const parsed = JSON.parse(serializedLayout) as {
+			left?: number
+			right?: number
+		}
+		if (
+			typeof parsed.left !== 'number' ||
+			typeof parsed.right !== 'number' ||
+			parsed.left <= 0 ||
+			parsed.right <= 0
+		) {
+			return { left: 60, right: 40 }
+		}
+
+		return {
+			left: parsed.left,
+			right: parsed.right,
+		}
+	} catch {
+		return { left: 60, right: 40 }
+	}
+}
+
 export const WorkspacePage = () => {
 	const queryClient = useQueryClient()
 	const [searchParams, setSearchParams] = useSearchParams()
+	const isMobile = useIsMobile()
 
 	const {
 		selectedConnectionId,
@@ -117,7 +158,7 @@ export const WorkspacePage = () => {
 		setSelectedKey,
 	} = useUiStore()
 	const selectedNamespaceId = selectedConnectionId
-		? selectedNamespaceIdByConnection[selectedConnectionId] ?? null
+		? (selectedNamespaceIdByConnection[selectedConnectionId] ?? null)
 		: null
 
 	const rawTab = searchParams.get('tab')
@@ -133,9 +174,55 @@ export const WorkspacePage = () => {
 	const [searchPattern, setSearchPattern] = React.useState('')
 	const [cursor, setCursor] = React.useState<string | undefined>(undefined)
 
-	const [keyName, setKeyName] = React.useState('')
-	const [keyValue, setKeyValue] = React.useState('')
-	const [keyTtlSeconds, setKeyTtlSeconds] = React.useState('')
+	const [isUpsertOpen, setIsUpsertOpen] = React.useState(false)
+	const [upsertMode, setUpsertMode] = React.useState<'create' | 'edit'>('create')
+	const [upsertTargetKey, setUpsertTargetKey] = React.useState<string | null>(
+		null,
+	)
+	const [upsertPrefilledForKey, setUpsertPrefilledForKey] = React.useState<
+		string | null
+	>(null)
+	const [upsertKeyName, setUpsertKeyName] = React.useState('')
+	const [upsertValue, setUpsertValue] = React.useState('')
+	const [upsertTtlSeconds, setUpsertTtlSeconds] = React.useState('')
+	const [workspacePanelLayout, setWorkspacePanelLayout] = React.useState(
+		readWorkspacePanelLayout,
+	)
+
+	const openCreateKeyModal = React.useCallback(() => {
+		setUpsertMode('create')
+		setUpsertTargetKey(null)
+		setUpsertPrefilledForKey(null)
+		setUpsertKeyName('')
+		setUpsertValue('')
+		setUpsertTtlSeconds('')
+		setIsUpsertOpen(true)
+	}, [])
+
+	const openEditKeyModal = React.useCallback(
+		(
+			key: string,
+			keyDetailData?: KeyValueRecord,
+			preloadedForKey?: string | null,
+		) => {
+			setSelectedKey(key)
+			setUpsertMode('edit')
+			setUpsertTargetKey(key)
+			setUpsertPrefilledForKey(null)
+
+			if (preloadedForKey === key && keyDetailData) {
+				setUpsertKeyName(key)
+				setUpsertValue(keyDetailData.value ?? '')
+				setUpsertTtlSeconds(
+					keyDetailData.ttlSeconds === null ? '' : String(keyDetailData.ttlSeconds),
+				)
+				setUpsertPrefilledForKey(key)
+			}
+
+			setIsUpsertOpen(true)
+		},
+		[setSelectedKey],
+	)
 
 	React.useEffect(() => {
 		if (isWorkspaceTab(rawTab)) {
@@ -160,6 +247,9 @@ export const WorkspacePage = () => {
 			null,
 		[connections, selectedConnectionId],
 	)
+	const isSelectedConnectionReadOnly = Boolean(
+		selectedConnection?.readOnly || selectedConnection?.forceReadOnly,
+	)
 
 	React.useEffect(() => {
 		if (connections.length === 0) {
@@ -179,7 +269,57 @@ export const WorkspacePage = () => {
 		setCursor(undefined)
 		setSearchPattern('')
 		setSelectedKey(null)
+		setIsUpsertOpen(false)
+		setUpsertPrefilledForKey(null)
 	}, [selectedConnectionId, selectedNamespaceId, setSelectedKey])
+
+	const namespacesQuery = useQuery({
+		queryKey: ['workspace-namespaces', selectedConnectionId],
+		enabled: Boolean(selectedConnectionId),
+		queryFn: async () => {
+			if (!selectedConnectionId) {
+				return []
+			}
+
+			return unwrapResponse(
+				await window.speichr.listNamespaces({
+					connectionId: selectedConnectionId,
+				}),
+			)
+		},
+	})
+
+	const keyPrefixNamespaces = React.useMemo(() => {
+		if (selectedNamespaceId) {
+			return []
+		}
+
+		return (namespacesQuery.data ?? [])
+			.filter(
+				(namespace) =>
+					namespace.strategy === 'keyPrefix' &&
+					typeof namespace.keyPrefix === 'string' &&
+					namespace.keyPrefix.length > 0,
+			)
+			.sort(
+				(left, right) =>
+					(right.keyPrefix?.length ?? 0) - (left.keyPrefix?.length ?? 0),
+			)
+	}, [namespacesQuery.data, selectedNamespaceId])
+
+	const resolveNamespaceBadge = React.useCallback(
+		(key: string): string | undefined => {
+			for (const namespace of keyPrefixNamespaces) {
+				const prefix = namespace.keyPrefix ?? ''
+				if (prefix.length > 0 && key.startsWith(prefix)) {
+					return namespace.name
+				}
+			}
+
+			return undefined
+		},
+		[keyPrefixNamespaces],
+	)
 
 	const capabilitiesQuery = useQuery({
 		queryKey: ['capabilities', selectedConnectionId],
@@ -198,13 +338,14 @@ export const WorkspacePage = () => {
 	})
 
 	const capabilities = capabilitiesQuery.data ?? defaultCapabilities
+	const trimmedSearchPattern = searchPattern.trim()
 
 	const keyListQuery = useQuery({
 		queryKey: [
 			'keys',
 			selectedConnectionId,
 			selectedNamespaceId,
-			searchPattern,
+			trimmedSearchPattern,
 			cursor,
 		],
 		enabled: Boolean(selectedConnectionId),
@@ -213,12 +354,12 @@ export const WorkspacePage = () => {
 				return defaultKeyListResult
 			}
 
-			if (searchPattern.trim().length > 0) {
+			if (trimmedSearchPattern.length > 0) {
 				return unwrapResponse(
 					await window.speichr.searchKeys({
 						connectionId: selectedConnectionId,
 						namespaceId: selectedNamespaceId ?? undefined,
-						pattern: searchPattern.trim(),
+						pattern: trimmedSearchPattern,
 						cursor,
 						limit: DEFAULT_PAGE_SIZE,
 					}),
@@ -231,6 +372,31 @@ export const WorkspacePage = () => {
 					namespaceId: selectedNamespaceId ?? undefined,
 					cursor,
 					limit: DEFAULT_PAGE_SIZE,
+				}),
+			)
+		},
+	})
+
+	const keyCountQuery = useQuery({
+		queryKey: [
+			'key-count',
+			selectedConnectionId,
+			selectedNamespaceId,
+			trimmedSearchPattern,
+		],
+		enabled: Boolean(selectedConnectionId),
+		queryFn: async () => {
+			if (!selectedConnectionId) {
+				return {
+					totalKeys: 0,
+				}
+			}
+
+			return unwrapResponse(
+				await window.speichr.countKeys({
+					connectionId: selectedConnectionId,
+					namespaceId: selectedNamespaceId ?? undefined,
+					pattern: trimmedSearchPattern || undefined,
 				}),
 			)
 		},
@@ -256,8 +422,43 @@ export const WorkspacePage = () => {
 		},
 	})
 
+	React.useEffect(() => {
+		if (!isUpsertOpen || upsertMode !== 'edit' || !upsertTargetKey) {
+			return
+		}
+
+		if (upsertPrefilledForKey === upsertTargetKey) {
+			return
+		}
+
+		if (selectedKey !== upsertTargetKey || !keyDetailQuery.data) {
+			return
+		}
+
+		setUpsertKeyName(upsertTargetKey)
+		setUpsertValue(keyDetailQuery.data.value ?? '')
+		setUpsertTtlSeconds(
+			keyDetailQuery.data.ttlSeconds === null
+				? ''
+				: String(keyDetailQuery.data.ttlSeconds),
+		)
+		setUpsertPrefilledForKey(upsertTargetKey)
+	}, [
+		isUpsertOpen,
+		upsertMode,
+		upsertTargetKey,
+		upsertPrefilledForKey,
+		selectedKey,
+		keyDetailQuery.data,
+	])
+
 	const snapshotsQuery = useQuery({
-		queryKey: ['snapshots', selectedConnectionId, selectedNamespaceId, selectedKey],
+		queryKey: [
+			'snapshots',
+			selectedConnectionId,
+			selectedNamespaceId,
+			selectedKey,
+		],
 		enabled: Boolean(selectedConnectionId && selectedKey && isRollbackOpen),
 		queryFn: async (): Promise<SnapshotRecord[]> => {
 			if (!selectedConnectionId || !selectedKey) {
@@ -329,44 +530,20 @@ export const WorkspacePage = () => {
 		toast.error(keyDetailError.message)
 	}, [keyDetailError, keyDetailQuery.errorUpdatedAt])
 
-	React.useEffect(() => {
-		if (!selectedKey) {
-			setKeyName('')
-			setKeyValue('')
-			setKeyTtlSeconds('')
-			return
-		}
-
-		setKeyName(selectedKey)
-	}, [selectedKey])
-
-	React.useEffect(() => {
-		if (!keyDetailQuery.data) {
-			return
-		}
-
-		setKeyValue(keyDetailQuery.data.value ?? '')
-		setKeyTtlSeconds(
-			keyDetailQuery.data.ttlSeconds === null
-				? ''
-				: String(keyDetailQuery.data.ttlSeconds),
-		)
-	}, [keyDetailQuery.data])
-
 	const saveKeyMutation = useMutation({
 		mutationFn: async () => {
 			if (!selectedConnectionId) {
 				throw new Error('Select a connection first.')
 			}
 
-			const normalizedKey = keyName.trim()
+			const normalizedKey = upsertKeyName.trim()
 			if (!normalizedKey) {
 				throw new Error('Key name is required.')
 			}
 
-			const ttl = Number(keyTtlSeconds)
+			const ttl = Number(upsertTtlSeconds)
 			const ttlSeconds =
-				keyTtlSeconds.trim().length > 0 && Number.isFinite(ttl) && ttl > 0
+				upsertTtlSeconds.trim().length > 0 && Number.isFinite(ttl) && ttl > 0
 					? ttl
 					: undefined
 
@@ -375,18 +552,22 @@ export const WorkspacePage = () => {
 					connectionId: selectedConnectionId,
 					namespaceId: selectedNamespaceId ?? undefined,
 					key: normalizedKey,
-					value: keyValue,
+					value: upsertValue,
 					ttlSeconds,
 				}),
 			)
 		},
 		onSuccess: async () => {
+			const normalizedKey = upsertKeyName.trim()
 			toast.success('Key saved.')
 			await queryClient.invalidateQueries({
 				queryKey: ['keys', selectedConnectionId, selectedNamespaceId],
 			})
 			await queryClient.invalidateQueries({
-				queryKey: ['key', selectedConnectionId, selectedNamespaceId, keyName.trim()],
+				queryKey: ['key-count', selectedConnectionId, selectedNamespaceId],
+			})
+			await queryClient.invalidateQueries({
+				queryKey: ['key', selectedConnectionId, selectedNamespaceId, normalizedKey],
 			})
 			await queryClient.invalidateQueries({ queryKey: ['alerts'] })
 			await queryClient.invalidateQueries({
@@ -396,7 +577,9 @@ export const WorkspacePage = () => {
 					selectedNamespaceId,
 				],
 			})
-			setSelectedKey(keyName.trim())
+			setSelectedKey(normalizedKey)
+			setIsUpsertOpen(false)
+			setUpsertPrefilledForKey(null)
 		},
 		onError: (error) => {
 			toast.error(error instanceof Error ? error.message : 'Save failed.')
@@ -422,6 +605,9 @@ export const WorkspacePage = () => {
 			toast.success('Key deleted.')
 			await queryClient.invalidateQueries({
 				queryKey: ['keys', selectedConnectionId, selectedNamespaceId],
+			})
+			await queryClient.invalidateQueries({
+				queryKey: ['key-count', selectedConnectionId, selectedNamespaceId],
 			})
 			await queryClient.invalidateQueries({ queryKey: ['alerts'] })
 			await queryClient.invalidateQueries({
@@ -499,9 +685,7 @@ export const WorkspacePage = () => {
 									<p className='text-destructive font-medium'>
 										Unable to load provider capabilities.
 									</p>
-									<p className='text-muted-foreground'>
-										{capabilitiesError.message}
-									</p>
+									<p className='text-muted-foreground'>{capabilitiesError.message}</p>
 								</div>
 								{capabilitiesError.retryable && (
 									<Button
@@ -528,103 +712,147 @@ export const WorkspacePage = () => {
 						}}
 						className='grid min-h-0 grid-rows-[auto_1fr] gap-3'
 					>
-						<TabsList>
-							<TabsTrigger value='workspace'>Workspace</TabsTrigger>
-							<TabsTrigger value='workflows'>Workflows</TabsTrigger>
-							<TabsTrigger value='observability'>Observability</TabsTrigger>
-							<TabsTrigger value='governance'>Governance</TabsTrigger>
-						</TabsList>
+						<div className='flex items-center justify-between gap-2'>
+							<TabsList>
+								<TabsTrigger value='workspace'>Workspace</TabsTrigger>
+								<TabsTrigger value='workflows'>Workflows</TabsTrigger>
+								<TabsTrigger value='observability'>Observability</TabsTrigger>
+								<TabsTrigger value='governance'>Governance</TabsTrigger>
+							</TabsList>
+							<Button
+								size='sm'
+								onClick={openCreateKeyModal}
+								disabled={isSelectedConnectionReadOnly}
+							>
+								<PlusIcon className='size-3.5' />
+								New Key
+							</Button>
+						</div>
 
 						<TabsContent value='workspace' className='min-h-0'>
-							<div className='grid min-h-0 gap-3 lg:grid-cols-2'>
-								<KeyListCard
-									title='Key Browser'
-									keys={keyList.keys}
-									selectedKey={selectedKey}
-									searchPattern={searchPattern}
-									isLoading={keyListQuery.isLoading}
-									errorMessage={keyListError?.message}
-									isRetryableError={keyListError?.retryable}
-									readOnly={Boolean(
-										selectedConnection.readOnly || selectedConnection.forceReadOnly,
-									)}
-									hasNextPage={Boolean(keyList.nextCursor)}
-									onSearchPatternChange={(value) => {
-										setSearchPattern(value)
-										setCursor(undefined)
-									}}
-									onSelectKey={(key) => setSelectedKey(key)}
-									onDeleteKey={(key) => {
-										setProdDeleteConfirmed(false)
-										setKeyPendingDelete(key)
-									}}
-									onRefresh={() =>
-										queryClient.invalidateQueries({
-											queryKey: [
-												'keys',
-												selectedConnectionId,
-												selectedNamespaceId,
-											],
-										})
+							<ResizablePanelGroup
+								orientation={isMobile ? 'vertical' : 'horizontal'}
+								defaultLayout={{
+									keyBrowser: workspacePanelLayout.left,
+									keyDetail: workspacePanelLayout.right,
+								}}
+								onLayoutChanged={(layout) => {
+									const nextLayout = {
+										left: typeof layout.keyBrowser === 'number' ? layout.keyBrowser : 75,
+										right: typeof layout.keyDetail === 'number' ? layout.keyDetail : 25,
 									}
-									onRetry={() => {
-										void keyListQuery.refetch()
-									}}
-									onLoadNextPage={() => setCursor(keyList.nextCursor)}
-								/>
 
-								<KeyDetailCard
-									keyName={keyName}
-									value={keyValue}
-									ttlSeconds={keyTtlSeconds}
-									readOnly={Boolean(
-										selectedConnection.readOnly || selectedConnection.forceReadOnly,
-									)}
-									supportsTTL={capabilities.supportsTTL}
-									isLoading={keyDetailQuery.isLoading}
-									errorMessage={keyDetailError?.message}
-									isRetryableError={keyDetailError?.retryable}
-									isExistingKey={Boolean(selectedKey)}
-									canRollback={Boolean(selectedKey)}
-									onRollback={() => {
-										setProdRollbackConfirmed(false)
-										setIsRollbackOpen(true)
-									}}
-									onNewKey={() => {
-										setSelectedKey(null)
-										setKeyName('')
-										setKeyValue('')
-										setKeyTtlSeconds('')
-									}}
-									onKeyNameChange={setKeyName}
-									onValueChange={setKeyValue}
-									onTtlChange={setKeyTtlSeconds}
-									onRetry={() => {
-										void keyDetailQuery.refetch()
-									}}
-									onSave={() => saveKeyMutation.mutate()}
-									onDelete={() => {
-										if (selectedKey) {
-											setProdDeleteConfirmed(false)
-											setKeyPendingDelete(selectedKey)
+									setWorkspacePanelLayout(nextLayout)
+									window.localStorage.setItem(
+										WORKSPACE_PANEL_LAYOUT_STORAGE_KEY,
+										JSON.stringify(nextLayout),
+									)
+								}}
+								className='h-full min-h-0'
+							>
+								<ResizablePanel
+									id='keyBrowser'
+									minSize={isMobile ? 35 : 30}
+									className='min-h-0'
+								>
+									<KeyListCard
+										title='Key Browser'
+										keys={keyList.keys}
+										selectedKey={selectedKey}
+										searchPattern={searchPattern}
+										isLoading={keyListQuery.isLoading}
+										errorMessage={keyListError?.message}
+										isRetryableError={keyListError?.retryable}
+										readOnly={isSelectedConnectionReadOnly}
+										hasNextPage={Boolean(keyList.nextCursor)}
+										totalKeys={keyCountQuery.data?.totalKeys}
+										totalFoundKeys={keyCountQuery.data?.totalFoundKeys}
+										isCountLoading={keyCountQuery.isLoading}
+										getNamespaceBadge={
+											selectedNamespaceId ? undefined : resolveNamespaceBadge
 										}
-									}}
-								/>
-							</div>
+										onSearchPatternChange={(value) => {
+											setSearchPattern(value)
+											setCursor(undefined)
+										}}
+										onSelectKey={(key) => setSelectedKey(key)}
+										onEditKey={(key) =>
+											openEditKeyModal(key, keyDetailQuery.data, selectedKey)
+										}
+										onDeleteKey={(key) => {
+											setProdDeleteConfirmed(false)
+											setKeyPendingDelete(key)
+										}}
+										onRefresh={() =>
+											toast.promise(
+												queryClient.invalidateQueries(
+													{
+														queryKey: ['keys', selectedConnectionId, selectedNamespaceId],
+													},
+													{ throwOnError: true },
+												),
+												{
+													loading: 'Refreshing keys...',
+													success: 'Keys refreshed.',
+													error: 'Failed to refresh keys.',
+												},
+											)
+										}
+										onRetry={() => {
+											void keyListQuery.refetch()
+										}}
+										onLoadNextPage={() => setCursor(keyList.nextCursor)}
+									/>
+								</ResizablePanel>
+
+								<ResizableHandle withHandle />
+
+								<ResizablePanel
+									id='keyDetail'
+									minSize={isMobile ? 25 : 20}
+									className='min-h-0'
+								>
+									<KeyDetailCard
+										keyName={selectedKey}
+										value={keyDetailQuery.data?.value ?? null}
+										ttlSeconds={keyDetailQuery.data?.ttlSeconds ?? null}
+										readOnly={isSelectedConnectionReadOnly}
+										supportsTTL={capabilities.supportsTTL}
+										isLoading={Boolean(selectedKey) && keyDetailQuery.isLoading}
+										errorMessage={keyDetailError?.message}
+										isRetryableError={keyDetailError?.retryable}
+										canRollback={Boolean(selectedKey)}
+										onRollback={() => {
+											setProdRollbackConfirmed(false)
+											setIsRollbackOpen(true)
+										}}
+										onRetry={() => {
+											void keyDetailQuery.refetch()
+										}}
+										onEdit={() => {
+											if (!selectedKey) {
+												return
+											}
+
+											openEditKeyModal(selectedKey, keyDetailQuery.data, selectedKey)
+										}}
+										onDelete={() => {
+											if (selectedKey) {
+												setProdDeleteConfirmed(false)
+												setKeyPendingDelete(selectedKey)
+											}
+										}}
+									/>
+								</ResizablePanel>
+							</ResizablePanelGroup>
 						</TabsContent>
 
 						<TabsContent value='workflows' className='min-h-0 overflow-auto'>
 							<WorkflowPanel connection={selectedConnection} mode='connection' />
 						</TabsContent>
 
-						<TabsContent
-							value='observability'
-							className='min-h-0 overflow-auto'
-						>
-							<ObservabilityPanel
-								connection={selectedConnection}
-								mode='connection'
-							/>
+						<TabsContent value='observability' className='min-h-0 overflow-auto'>
+							<ObservabilityPanel connection={selectedConnection} mode='connection' />
 						</TabsContent>
 
 						<TabsContent value='governance' className='min-h-0 overflow-auto'>
@@ -641,6 +869,44 @@ export const WorkspacePage = () => {
 					</Card>
 				</div>
 			)}
+
+			<KeyUpsertDialog
+				open={isUpsertOpen}
+				mode={upsertMode}
+				readOnly={isSelectedConnectionReadOnly}
+				supportsTTL={capabilities.supportsTTL}
+				isLoading={
+					upsertMode === 'edit' &&
+					Boolean(upsertTargetKey) &&
+					upsertPrefilledForKey !== upsertTargetKey &&
+					!keyDetailError
+				}
+				isSaving={saveKeyMutation.isPending}
+				errorMessage={
+					upsertMode === 'edit' &&
+					selectedKey === upsertTargetKey &&
+					upsertPrefilledForKey !== upsertTargetKey
+						? keyDetailError?.message
+						: undefined
+				}
+				isRetryableError={keyDetailError?.retryable}
+				keyName={upsertKeyName}
+				value={upsertValue}
+				ttlSeconds={upsertTtlSeconds}
+				onOpenChange={(open) => {
+					setIsUpsertOpen(open)
+					if (!open) {
+						setUpsertPrefilledForKey(null)
+					}
+				}}
+				onKeyNameChange={setUpsertKeyName}
+				onValueChange={setUpsertValue}
+				onTtlChange={setUpsertTtlSeconds}
+				onRetry={() => {
+					void keyDetailQuery.refetch()
+				}}
+				onSave={() => saveKeyMutation.mutate()}
+			/>
 
 			<AlertDialog
 				open={Boolean(keyPendingDelete)}
@@ -662,9 +928,7 @@ export const WorkspacePage = () => {
 						<label className='flex items-center gap-2 text-xs text-destructive'>
 							<Checkbox
 								checked={prodDeleteConfirmed}
-								onCheckedChange={(checked) =>
-									setProdDeleteConfirmed(Boolean(checked))
-								}
+								onCheckedChange={(checked) => setProdDeleteConfirmed(Boolean(checked))}
 							/>
 							Confirm destructive action on prod connection
 						</label>
@@ -683,8 +947,7 @@ export const WorkspacePage = () => {
 								}
 							}}
 							disabled={
-								selectedConnection?.environment === 'prod' &&
-								!prodDeleteConfirmed
+								selectedConnection?.environment === 'prod' && !prodDeleteConfirmed
 							}
 						>
 							Delete
@@ -716,9 +979,7 @@ export const WorkspacePage = () => {
 
 					<div className='max-h-72 space-y-2 overflow-auto'>
 						{snapshotsQuery.isLoading ? (
-							<p className='text-muted-foreground text-xs'>
-								Loading snapshots...
-							</p>
+							<p className='text-muted-foreground text-xs'>Loading snapshots...</p>
 						) : (snapshotsQuery.data?.length ?? 0) === 0 ? (
 							<p className='text-muted-foreground text-xs'>
 								No snapshots were found for this key.
@@ -737,9 +998,7 @@ export const WorkspacePage = () => {
 									</div>
 									<div className='text-muted-foreground'>
 										<p>TTL: {snapshot.ttlSeconds ?? '-'}</p>
-										<p className='break-all'>
-											hash: {snapshot.redactedValueHash}
-										</p>
+										<p className='break-all'>hash: {snapshot.redactedValueHash}</p>
 									</div>
 									<Button
 										size='sm'
