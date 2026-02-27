@@ -111,10 +111,14 @@ export const WorkspacePage = () => {
 
 	const {
 		selectedConnectionId,
+		selectedNamespaceIdByConnection,
 		selectedKey,
 		setSelectedConnectionId,
 		setSelectedKey,
 	} = useUiStore()
+	const selectedNamespaceId = selectedConnectionId
+		? selectedNamespaceIdByConnection[selectedConnectionId] ?? null
+		: null
 
 	const rawTab = searchParams.get('tab')
 	const activeTab: WorkspaceTab = isWorkspaceTab(rawTab) ? rawTab : 'workspace'
@@ -175,7 +179,7 @@ export const WorkspacePage = () => {
 		setCursor(undefined)
 		setSearchPattern('')
 		setSelectedKey(null)
-	}, [selectedConnectionId, setSelectedKey])
+	}, [selectedConnectionId, selectedNamespaceId, setSelectedKey])
 
 	const capabilitiesQuery = useQuery({
 		queryKey: ['capabilities', selectedConnectionId],
@@ -196,7 +200,13 @@ export const WorkspacePage = () => {
 	const capabilities = capabilitiesQuery.data ?? defaultCapabilities
 
 	const keyListQuery = useQuery({
-		queryKey: ['keys', selectedConnectionId, searchPattern, cursor],
+		queryKey: [
+			'keys',
+			selectedConnectionId,
+			selectedNamespaceId,
+			searchPattern,
+			cursor,
+		],
 		enabled: Boolean(selectedConnectionId),
 		queryFn: async () => {
 			if (!selectedConnectionId) {
@@ -207,6 +217,7 @@ export const WorkspacePage = () => {
 				return unwrapResponse(
 					await window.speichr.searchKeys({
 						connectionId: selectedConnectionId,
+						namespaceId: selectedNamespaceId ?? undefined,
 						pattern: searchPattern.trim(),
 						cursor,
 						limit: DEFAULT_PAGE_SIZE,
@@ -217,6 +228,7 @@ export const WorkspacePage = () => {
 			return unwrapResponse(
 				await window.speichr.listKeys({
 					connectionId: selectedConnectionId,
+					namespaceId: selectedNamespaceId ?? undefined,
 					cursor,
 					limit: DEFAULT_PAGE_SIZE,
 				}),
@@ -227,7 +239,7 @@ export const WorkspacePage = () => {
 	const keyList = keyListQuery.data ?? defaultKeyListResult
 
 	const keyDetailQuery = useQuery({
-		queryKey: ['key', selectedConnectionId, selectedKey],
+		queryKey: ['key', selectedConnectionId, selectedNamespaceId, selectedKey],
 		enabled: Boolean(selectedConnectionId && selectedKey),
 		queryFn: async (): Promise<KeyValueRecord> => {
 			if (!selectedConnectionId || !selectedKey) {
@@ -237,6 +249,7 @@ export const WorkspacePage = () => {
 			return unwrapResponse(
 				await window.speichr.getKey({
 					connectionId: selectedConnectionId,
+					namespaceId: selectedNamespaceId ?? undefined,
 					key: selectedKey,
 				}),
 			)
@@ -244,7 +257,7 @@ export const WorkspacePage = () => {
 	})
 
 	const snapshotsQuery = useQuery({
-		queryKey: ['snapshots', selectedConnectionId, selectedKey],
+		queryKey: ['snapshots', selectedConnectionId, selectedNamespaceId, selectedKey],
 		enabled: Boolean(selectedConnectionId && selectedKey && isRollbackOpen),
 		queryFn: async (): Promise<SnapshotRecord[]> => {
 			if (!selectedConnectionId || !selectedKey) {
@@ -254,6 +267,7 @@ export const WorkspacePage = () => {
 			return unwrapResponse(
 				await window.speichr.listSnapshots({
 					connectionId: selectedConnectionId,
+					namespaceId: selectedNamespaceId ?? undefined,
 					key: selectedKey,
 					limit: 25,
 				}),
@@ -359,6 +373,7 @@ export const WorkspacePage = () => {
 			return unwrapResponse(
 				await window.speichr.setKey({
 					connectionId: selectedConnectionId,
+					namespaceId: selectedNamespaceId ?? undefined,
 					key: normalizedKey,
 					value: keyValue,
 					ttlSeconds,
@@ -368,14 +383,18 @@ export const WorkspacePage = () => {
 		onSuccess: async () => {
 			toast.success('Key saved.')
 			await queryClient.invalidateQueries({
-				queryKey: ['keys', selectedConnectionId],
+				queryKey: ['keys', selectedConnectionId, selectedNamespaceId],
 			})
 			await queryClient.invalidateQueries({
-				queryKey: ['key', selectedConnectionId, keyName.trim()],
+				queryKey: ['key', selectedConnectionId, selectedNamespaceId, keyName.trim()],
 			})
 			await queryClient.invalidateQueries({ queryKey: ['alerts'] })
 			await queryClient.invalidateQueries({
-				queryKey: ['observability-dashboard', selectedConnectionId],
+				queryKey: [
+					'observability-dashboard',
+					selectedConnectionId,
+					selectedNamespaceId,
+				],
 			})
 			setSelectedKey(keyName.trim())
 		},
@@ -393,6 +412,7 @@ export const WorkspacePage = () => {
 			return unwrapResponse(
 				await window.speichr.deleteKey({
 					connectionId: selectedConnectionId,
+					namespaceId: selectedNamespaceId ?? undefined,
 					key: args.key,
 					guardrailConfirmed: args.guardrailConfirmed,
 				}),
@@ -401,11 +421,15 @@ export const WorkspacePage = () => {
 		onSuccess: async (_result, args) => {
 			toast.success('Key deleted.')
 			await queryClient.invalidateQueries({
-				queryKey: ['keys', selectedConnectionId],
+				queryKey: ['keys', selectedConnectionId, selectedNamespaceId],
 			})
 			await queryClient.invalidateQueries({ queryKey: ['alerts'] })
 			await queryClient.invalidateQueries({
-				queryKey: ['observability-dashboard', selectedConnectionId],
+				queryKey: [
+					'observability-dashboard',
+					selectedConnectionId,
+					selectedNamespaceId,
+				],
 			})
 			if (selectedKey === args.key) {
 				setSelectedKey(null)
@@ -425,6 +449,7 @@ export const WorkspacePage = () => {
 			return unwrapResponse(
 				await window.speichr.restoreSnapshot({
 					connectionId: selectedConnectionId,
+					namespaceId: selectedNamespaceId ?? undefined,
 					key: selectedKey,
 					snapshotId,
 					guardrailConfirmed: prodRollbackConfirmed,
@@ -434,11 +459,15 @@ export const WorkspacePage = () => {
 		onSuccess: async () => {
 			toast.success('Snapshot restored.')
 			await queryClient.invalidateQueries({
-				queryKey: ['key', selectedConnectionId, selectedKey],
+				queryKey: ['key', selectedConnectionId, selectedNamespaceId, selectedKey],
 			})
 			await queryClient.invalidateQueries({ queryKey: ['alerts'] })
 			await queryClient.invalidateQueries({
-				queryKey: ['observability-dashboard', selectedConnectionId],
+				queryKey: [
+					'observability-dashboard',
+					selectedConnectionId,
+					selectedNamespaceId,
+				],
 			})
 			setIsRollbackOpen(false)
 		},
@@ -531,7 +560,11 @@ export const WorkspacePage = () => {
 									}}
 									onRefresh={() =>
 										queryClient.invalidateQueries({
-											queryKey: ['keys', selectedConnectionId],
+											queryKey: [
+												'keys',
+												selectedConnectionId,
+												selectedNamespaceId,
+											],
 										})
 									}
 									onRetry={() => {

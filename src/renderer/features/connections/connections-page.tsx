@@ -91,7 +91,11 @@ const formatUpdatedAt = (value: string): string => {
 export const ConnectionsPage = () => {
 	const queryClient = useQueryClient()
 	const navigate = useNavigate()
-	const { selectedConnectionId, setSelectedConnectionId } = useUiStore()
+	const {
+		selectedConnectionId,
+		setSelectedConnectionId,
+		clearConnectionNamespaceSelection,
+	} = useUiStore()
 
 	const [searchText, setSearchText] = React.useState('')
 	const [engineFilter, setEngineFilter] =
@@ -123,6 +127,7 @@ export const ConnectionsPage = () => {
 		mutationFn: async (connectionId: string) =>
 			unwrapResponse(await window.speichr.deleteConnection({ id: connectionId })),
 		onSuccess: async (_result, connectionId) => {
+			clearConnectionNamespaceSelection(connectionId)
 			if (selectedConnectionId === connectionId) {
 				setSelectedConnectionId(null)
 			}

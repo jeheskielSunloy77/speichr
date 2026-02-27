@@ -24,6 +24,7 @@ import {
 } from '@/renderer/components/ui/table'
 import { Textarea } from '@/renderer/components/ui/textarea'
 import { unwrapResponse } from '@/renderer/features/common/ipc'
+import { useUiStore } from '@/renderer/state/ui-store'
 import type {
 	ConnectionProfile,
 	WorkflowDryRunPreview,
@@ -74,6 +75,10 @@ export const WorkflowPanel = ({
 	const isConnectionMode = mode === 'connection'
 	const isTemplatesMode = mode === 'templates'
 	const connectionId = connection?.id ?? null
+	const { selectedNamespaceIdByConnection } = useUiStore()
+	const selectedNamespaceId = connectionId
+		? selectedNamespaceIdByConnection[connectionId] ?? null
+		: null
 
 	const [selectedTemplateId, setSelectedTemplateId] = React.useState<string>('')
 	const [templateName, setTemplateName] = React.useState('')
@@ -104,12 +109,13 @@ export const WorkflowPanel = ({
 	})
 
 	const executionsQuery = useQuery({
-		queryKey: ['workflow-executions', connectionId],
+		queryKey: ['workflow-executions', connectionId, selectedNamespaceId],
 		enabled: isConnectionMode && Boolean(connectionId),
 		queryFn: async () =>
 			unwrapResponse(
 				await window.speichr.listWorkflowExecutions({
 					connectionId: connectionId ?? '',
+					namespaceId: selectedNamespaceId ?? undefined,
 					limit: 50,
 				}),
 			),
@@ -270,6 +276,7 @@ export const WorkflowPanel = ({
 			return unwrapResponse(
 				await window.speichr.previewWorkflow({
 					connectionId,
+					namespaceId: selectedNamespaceId ?? undefined,
 					...buildTemplateSource(),
 					cursor: args?.cursor,
 					limit: PREVIEW_PAGE_SIZE,
@@ -294,6 +301,7 @@ export const WorkflowPanel = ({
 			return unwrapResponse(
 				await window.speichr.executeWorkflow({
 					connectionId,
+					namespaceId: selectedNamespaceId ?? undefined,
 					...buildTemplateSource(),
 					dryRun,
 					guardrailConfirmed: prodGuardrailConfirmed,
@@ -313,10 +321,14 @@ export const WorkflowPanel = ({
 			toast.success(`Workflow ${result.status}.`)
 			if (connectionId) {
 				await queryClient.invalidateQueries({
-					queryKey: ['workflow-executions', connectionId],
+					queryKey: ['workflow-executions', connectionId, selectedNamespaceId],
 				})
 				await queryClient.invalidateQueries({
-					queryKey: ['observability-dashboard', connectionId],
+					queryKey: [
+						'observability-dashboard',
+						connectionId,
+						selectedNamespaceId,
+					],
 				})
 			}
 			await queryClient.invalidateQueries({ queryKey: ['alerts'] })

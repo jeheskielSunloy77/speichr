@@ -12,6 +12,7 @@ import {
 import * as React from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 
+import { Badge } from '@/renderer/components/ui/badge'
 import { Button } from '@/renderer/components/ui/button'
 import {
 	DropdownMenu,
@@ -19,6 +20,9 @@ import {
 	DropdownMenuGroup,
 	DropdownMenuItem,
 	DropdownMenuLabel,
+	DropdownMenuSub,
+	DropdownMenuSubContent,
+	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
 } from '@/renderer/components/ui/dropdown-menu'
 import {
@@ -141,8 +145,13 @@ const NavMenu = ({
 export const AppShellLayout = () => {
 	const navigate = useNavigate()
 	const location = useLocation()
-	const { selectedConnectionId, setSelectedConnectionId, setSettingsOpen } =
-		useUiStore()
+	const {
+		selectedConnectionId,
+		selectedNamespaceIdByConnection,
+		setSelectedConnectionId,
+		setSelectedNamespaceId,
+		setSettingsOpen,
+	} = useUiStore()
 
 	const connectionsQuery = useQuery({
 		queryKey: ['connections'],
@@ -156,6 +165,9 @@ export const AppShellLayout = () => {
 			null,
 		[connections, selectedConnectionId],
 	)
+	const selectedNamespaceId = selectedConnectionId
+		? (selectedNamespaceIdByConnection[selectedConnectionId] ?? null)
+		: null
 
 	React.useEffect(() => {
 		if (connections.length === 0) {
@@ -171,6 +183,46 @@ export const AppShellLayout = () => {
 		}
 	}, [connections, selectedConnectionId, setSelectedConnectionId])
 
+	const selectedConnectionNamespacesQuery = useQuery({
+		queryKey: ['namespaces', selectedConnectionId],
+		enabled: Boolean(selectedConnectionId),
+		queryFn: async () =>
+			unwrapResponse(
+				await window.speichr.listNamespaces({
+					connectionId: selectedConnectionId ?? '',
+				}),
+			),
+	})
+
+	const allNamespacesQuery = useQuery({
+		queryKey: [
+			'namespaces-by-connection',
+			connections.map((c) => c.id).join(','),
+		],
+		enabled: connections.length > 0,
+		queryFn: async () => {
+			const entries = await Promise.all(
+				connections.map(async (connection) => {
+					const namespaces = unwrapResponse(
+						await window.speichr.listNamespaces({
+							connectionId: connection.id,
+						}),
+					)
+					return [connection.id, namespaces] as const
+				}),
+			)
+			return Object.fromEntries(entries)
+		},
+	})
+
+	const selectedNamespace = React.useMemo(
+		() =>
+			(selectedConnectionNamespacesQuery.data ?? []).find(
+				(namespace) => namespace.id === selectedNamespaceId,
+			) ?? null,
+		[selectedConnectionNamespacesQuery.data, selectedNamespaceId],
+	)
+
 	const pageTitle = getPageTitle(location.pathname)
 
 	return (
@@ -178,31 +230,68 @@ export const AppShellLayout = () => {
 			<Sidebar>
 				<SidebarHeader>
 					<DropdownMenu>
-						<DropdownMenuTrigger className='w-full'>
-							<Button variant='outline' className='w-full h-fit justify-start py-2'>
-								<div className='font-medium flex items-center gap-2 w-full'>
-									<GaugeIcon className='size-3.5' />
-									{selectedConnection ? (
-										<div className='flex items-center w-full justify-between gap-2'>
-											<p className='truncate font-medium'>{selectedConnection.name}</p>
-											<ChevronDownIcon className='size-3.5' />
-										</div>
-									) : (
-										<p>No Connection Selected</p>
-									)}
-								</div>
-							</Button>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent>
+						<DropdownMenuTrigger
+							className='w-full'
+							render={
+								<Button variant='outline' className='w-full h-fit justify-start py-2'>
+									<div className='font-medium flex items-start gap-2 w-full'>
+										<GaugeIcon className='mt-0.5 size-3.5 shrink-0' />
+										{selectedConnection ? (
+											<div className='flex w-full items-start justify-between gap-2'>
+												<div className='min-w-0'>
+													<p className='truncate w-fit font-medium'>
+														{selectedConnection.name}
+													</p>
+													<div className='flex items-center gap-1 mt-0.5'>
+														<Badge>{selectedConnection.environment}</Badge>
+														<Badge variant='outline'>
+															{selectedNamespace ? selectedNamespace.name : 'All Data'}
+														</Badge>
+													</div>
+												</div>
+												<ChevronDownIcon className='size-3.5 shrink-0' />
+											</div>
+										) : (
+											<p>No Connection Selected</p>
+										)}
+									</div>
+								</Button>
+							}
+						></DropdownMenuTrigger>
+						<DropdownMenuContent className='w-64'>
 							<DropdownMenuGroup>
 								<DropdownMenuLabel>Saved Connections</DropdownMenuLabel>
 								{connections.map((connection) => (
-									<DropdownMenuItem
-										key={connection.id}
-										onClick={() => setSelectedConnectionId(connection.id)}
-									>
-										{connection.name}
-									</DropdownMenuItem>
+									<DropdownMenuSub key={connection.id}>
+										<DropdownMenuSubTrigger
+											onClick={() => setSelectedConnectionId(connection.id)}
+										>
+											{connection.name}
+										</DropdownMenuSubTrigger>
+										<DropdownMenuSubContent>
+											<DropdownMenuItem
+												onClick={() => {
+													setSelectedConnectionId(connection.id)
+													setSelectedNamespaceId(connection.id, null)
+												}}
+											>
+												All Data
+											</DropdownMenuItem>
+											{(allNamespacesQuery.data?.[connection.id] ?? []).map(
+												(namespace) => (
+													<DropdownMenuItem
+														key={namespace.id}
+														onClick={() => {
+															setSelectedConnectionId(connection.id)
+															setSelectedNamespaceId(connection.id, namespace.id)
+														}}
+													>
+														{namespace.name}
+													</DropdownMenuItem>
+												),
+											)}
+										</DropdownMenuSubContent>
+									</DropdownMenuSub>
 								))}
 							</DropdownMenuGroup>
 						</DropdownMenuContent>

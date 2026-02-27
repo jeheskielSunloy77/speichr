@@ -23,6 +23,7 @@ import {
 	TableRow,
 } from '@/renderer/components/ui/table'
 import { unwrapResponse } from '@/renderer/features/common/ipc'
+import { useUiStore } from '@/renderer/state/ui-store'
 import type {
 	ConnectionProfile,
 	IncidentBundleInclude,
@@ -90,6 +91,9 @@ export const ObservabilityPanel = ({
 	mode = 'connection',
 }: ObservabilityPanelProps) => {
 	const queryClient = useQueryClient()
+	const { selectedNamespaceIdByConnection } = useUiStore()
+	const selectedNamespaceId =
+		selectedNamespaceIdByConnection[connection.id] ?? null
 	const showConnectionSections = mode === 'connection'
 	const showIncidentSection = mode === 'incident'
 
@@ -169,12 +173,18 @@ export const ObservabilityPanel = ({
 	)
 
 	const dashboardQuery = useQuery({
-		queryKey: ['observability-dashboard', connection.id, intervalMinutes],
+		queryKey: [
+			'observability-dashboard',
+			connection.id,
+			selectedNamespaceId,
+			intervalMinutes,
+		],
 		enabled: showConnectionSections,
 		queryFn: async () =>
 			unwrapResponse(
 				await window.speichr.getObservabilityDashboard({
 					connectionId: connection.id,
+					namespaceId: selectedNamespaceId ?? undefined,
 					intervalMinutes: Math.max(1, Number(intervalMinutes) || 5),
 					limit: 300,
 				}),
@@ -185,6 +195,7 @@ export const ObservabilityPanel = ({
 		queryKey: [
 			'observability-keyspace',
 			connection.id,
+			selectedNamespaceId,
 			activityFrom,
 			activityTo,
 			activityIntervalMinutes,
@@ -194,6 +205,7 @@ export const ObservabilityPanel = ({
 			unwrapResponse(
 				await window.speichr.getKeyspaceActivity({
 					connectionId: connection.id,
+					namespaceId: selectedNamespaceId ?? undefined,
 					from: toIsoOrFallback(
 						activityFrom,
 						new Date(Date.now() - ONE_HOUR_MS),
@@ -209,6 +221,7 @@ export const ObservabilityPanel = ({
 		queryKey: [
 			'observability-failures',
 			connection.id,
+			selectedNamespaceId,
 			failedFrom,
 			failedTo,
 			failedLimit,
@@ -218,6 +231,7 @@ export const ObservabilityPanel = ({
 			unwrapResponse(
 				await window.speichr.getFailedOperationDrilldown({
 					connectionId: connection.id,
+					namespaceId: selectedNamespaceId ?? undefined,
 					from: toIsoOrFallback(failedFrom, new Date(Date.now() - ONE_HOUR_MS)),
 					to: toIsoOrFallback(failedTo, new Date()),
 					limit: Math.max(1, Number(failedLimit) || 50),
@@ -229,6 +243,7 @@ export const ObservabilityPanel = ({
 		queryKey: [
 			'observability-compare',
 			connection.id,
+			selectedNamespaceId,
 			baselineFrom,
 			baselineTo,
 			compareFrom,
@@ -239,6 +254,7 @@ export const ObservabilityPanel = ({
 			unwrapResponse(
 				await window.speichr.comparePeriods({
 					connectionId: connection.id,
+					namespaceId: selectedNamespaceId ?? undefined,
 					baselineFrom: toIsoOrFallback(
 						baselineFrom,
 						new Date(Date.now() - ONE_HOUR_MS * 2),
@@ -299,6 +315,7 @@ export const ObservabilityPanel = ({
 			from: toIsoOrFallback(incidentFrom, new Date(Date.now() - ONE_HOUR_MS)),
 			to: toIsoOrFallback(incidentTo, new Date()),
 			connectionIds: [connection.id],
+			namespaceId: selectedNamespaceId ?? undefined,
 			includes: selectedIncidentIncludes,
 			redactionProfile: incidentRedactionProfile,
 		}
@@ -307,6 +324,7 @@ export const ObservabilityPanel = ({
 		incidentFrom,
 		incidentTo,
 		connection.id,
+		selectedNamespaceId,
 		incidentRedactionProfile,
 	])
 

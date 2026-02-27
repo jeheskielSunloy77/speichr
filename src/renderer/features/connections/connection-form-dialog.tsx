@@ -18,7 +18,9 @@ import type {
 	ConnectionDraft,
 	ConnectionProfile,
 	ConnectionSecret,
+	NamespaceProfile,
 } from '@/shared/contracts/cache'
+import { PlusIcon, SaveIcon, SearchCheck, Trash2Icon } from 'lucide-react'
 
 const DEFAULT_TIMEOUT_MS = 5000
 
@@ -37,7 +39,6 @@ type FormState = {
 	engine: 'redis' | 'memcached'
 	host: string
 	port: string
-	dbIndex: string
 	tlsEnabled: boolean
 	environment: 'dev' | 'staging' | 'prod'
 	tags: string
@@ -52,12 +53,20 @@ type FormState = {
 	password: string
 }
 
+type NamespaceFormRow = {
+	id?: string
+	name: string
+	strategy: 'redisLogicalDb' | 'keyPrefix'
+	dbIndex: string
+	keyPrefix: string
+	originalName?: string
+}
+
 const createDefaultFormState = (): FormState => ({
 	name: '',
 	engine: 'redis',
 	host: '127.0.0.1',
 	port: '6379',
-	dbIndex: '0',
 	tlsEnabled: false,
 	environment: 'dev',
 	tags: '',
@@ -77,7 +86,6 @@ const profileToFormState = (profile: ConnectionProfile): FormState => ({
 	engine: profile.engine,
 	host: profile.host,
 	port: String(profile.port),
-	dbIndex: String(profile.dbIndex ?? 0),
 	tlsEnabled: profile.tlsEnabled,
 	environment: profile.environment,
 	tags: profile.tags.join(', '),
@@ -92,6 +100,15 @@ const profileToFormState = (profile: ConnectionProfile): FormState => ({
 	password: '',
 })
 
+const namespaceToFormRow = (namespace: NamespaceProfile): NamespaceFormRow => ({
+	id: namespace.id,
+	name: namespace.name,
+	strategy: namespace.strategy,
+	dbIndex: String(namespace.dbIndex ?? 0),
+	keyPrefix: namespace.keyPrefix ?? '',
+	originalName: namespace.name,
+})
+
 export const ConnectionFormDialog = ({
 	open,
 	mode,
@@ -100,6 +117,13 @@ export const ConnectionFormDialog = ({
 	onSaved,
 }: ConnectionFormDialogProps) => {
 	const [form, setForm] = React.useState<FormState>(createDefaultFormState())
+	const [namespaceRows, setNamespaceRows] = React.useState<NamespaceFormRow[]>(
+		[],
+	)
+	const [deletedNamespaceIds, setDeletedNamespaceIds] = React.useState<string[]>(
+		[],
+	)
+	const [isLoadingNamespaces, setIsLoadingNamespaces] = React.useState(false)
 	const [isSaving, setIsSaving] = React.useState(false)
 	const [isTesting, setIsTesting] = React.useState(false)
 
@@ -113,12 +137,32 @@ export const ConnectionFormDialog = ({
 				? profileToFormState(initialProfile)
 				: createDefaultFormState(),
 		)
+		setDeletedNamespaceIds([])
+		if (mode === 'create') {
+			setNamespaceRows([])
+			return
+		}
+		if (!initialProfile) {
+			setNamespaceRows([])
+			return
+		}
+
+		setIsLoadingNamespaces(true)
+		void window.speichr
+			.listNamespaces({ connectionId: initialProfile.id })
+			.then((response) => unwrapResponse(response))
+			.then((namespaces) => {
+				setNamespaceRows(namespaces.map(namespaceToFormRow))
+			})
+			.catch(() => {
+				setNamespaceRows([])
+			})
+			.finally(() => setIsLoadingNamespaces(false))
 	}, [mode, open, initialProfile])
 
 	const draft = React.useMemo<ConnectionDraft>(() => {
 		const parsedPort = Number(form.port)
 		const parsedTimeoutMs = Number(form.timeoutMs)
-		const parsedDbIndex = Number(form.dbIndex)
 		const parsedRetryMaxAttempts = Number(form.retryMaxAttempts)
 		const parsedRetryBackoffMs = Number(form.retryBackoffMs)
 		const parsedRetryAbortOnErrorRate = Number(form.retryAbortOnErrorRate)
@@ -128,10 +172,6 @@ export const ConnectionFormDialog = ({
 			engine: form.engine,
 			host: form.host.trim(),
 			port: Number.isFinite(parsedPort) ? parsedPort : 0,
-			dbIndex:
-				form.engine === 'redis' && Number.isFinite(parsedDbIndex)
-					? parsedDbIndex
-					: undefined,
 			tlsEnabled: form.tlsEnabled,
 			environment: form.environment,
 			tags: form.tags
@@ -180,6 +220,90 @@ export const ConnectionFormDialog = ({
 		}))
 	}
 
+	const addNamespaceRow = (): void => {
+		setNamespaceRows((previous) => [
+			...previous,
+			{
+				name: '',
+				strategy: form.engine === 'memcached' ? 'keyPrefix' : 'redisLogicalDb',
+				dbIndex: '0',
+				keyPrefix: '',
+			},
+		])
+	}
+
+	const updateNamespaceRow = (
+		index: number,
+		patch: Partial<NamespaceFormRow>,
+	): void => {
+		setNamespaceRows((previous) =>
+			previous.map((row, rowIndex) =>
+				rowIndex === index
+					? {
+							...row,
+							...patch,
+						}
+					: row,
+			),
+		)
+	}
+
+	const removeNamespaceRow = (index: number): void => {
+		setNamespaceRows((previous) => {
+			const row = previous[index]
+			if (row?.id) {
+				setDeletedNamespaceIds((existing) => [...existing, row.id as string])
+			}
+			return previous.filter((_row, rowIndex) => rowIndex !== index)
+		})
+	}
+
+	const syncNamespaces = async (
+		connectionId: string,
+		engine: ConnectionProfile['engine'],
+	): Promise<void> => {
+		for (const namespaceId of deletedNamespaceIds) {
+			unwrapResponse(await window.speichr.deleteNamespace({ id: namespaceId }))
+		}
+
+		for (const row of namespaceRows) {
+			const normalizedName = row.name.trim()
+			if (!normalizedName) {
+				continue
+			}
+
+			if (row.id) {
+				if (normalizedName !== (row.originalName ?? '').trim()) {
+					unwrapResponse(
+						await window.speichr.updateNamespace({
+							id: row.id,
+							name: normalizedName,
+						}),
+					)
+				}
+				continue
+			}
+
+			unwrapResponse(
+				await window.speichr.createNamespace({
+					namespace: {
+						connectionId,
+						name: normalizedName,
+						strategy: engine === 'memcached' ? 'keyPrefix' : row.strategy,
+						dbIndex:
+							engine === 'redis' && row.strategy === 'redisLogicalDb'
+								? Number(row.dbIndex)
+								: undefined,
+						keyPrefix:
+							engine === 'memcached' || row.strategy === 'keyPrefix'
+								? row.keyPrefix
+								: undefined,
+					},
+				}),
+			)
+		}
+	}
+
 	const handleTestConnection = async (): Promise<void> => {
 		setIsTesting(true)
 		try {
@@ -218,6 +342,7 @@ export const ConnectionFormDialog = ({
 						secret,
 					}),
 				)
+				await syncNamespaces(profile.id, profile.engine)
 
 				toast.success('Connection profile created.')
 				onSaved(profile)
@@ -231,6 +356,7 @@ export const ConnectionFormDialog = ({
 						secret: includeSecret ? secret : undefined,
 					}),
 				)
+				await syncNamespaces(profile.id, profile.engine)
 
 				toast.success('Connection profile updated.')
 				onSaved(profile)
@@ -247,7 +373,7 @@ export const ConnectionFormDialog = ({
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className='max-w-3xl'>
+			<DialogContent className='sm:max-w-5xl'>
 				<DialogHeader>
 					<DialogTitle>
 						{mode === 'create' ? 'New Connection' : 'Edit Connection'}
@@ -275,9 +401,20 @@ export const ConnectionFormDialog = ({
 						<select
 							id='connection-engine'
 							value={form.engine}
-							onChange={(event) =>
-								onFieldChange('engine', event.target.value as FormState['engine'])
-							}
+							onChange={(event) => {
+								const nextEngine = event.target.value as FormState['engine']
+								onFieldChange('engine', nextEngine)
+								setNamespaceRows((previous) =>
+									previous.map((row) =>
+										nextEngine === 'memcached'
+											? {
+													...row,
+													strategy: 'keyPrefix',
+												}
+											: row,
+									),
+								)
+							}}
 							className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
 						>
 							<option value='redis'>Redis</option>
@@ -304,17 +441,6 @@ export const ConnectionFormDialog = ({
 							placeholder={form.engine === 'redis' ? '6379' : '11211'}
 						/>
 					</div>
-
-					{form.engine === 'redis' && (
-						<div className='space-y-1.5'>
-							<Label htmlFor='connection-db-index'>Redis DB Index</Label>
-							<Input
-								id='connection-db-index'
-								value={form.dbIndex}
-								onChange={(event) => onFieldChange('dbIndex', event.target.value)}
-							/>
-						</div>
-					)}
 
 					<div className='space-y-1.5'>
 						<Label htmlFor='connection-environment'>Environment</Label>
@@ -451,15 +577,107 @@ export const ConnectionFormDialog = ({
 					</div>
 				</div>
 
+				<div className='space-y-2 border-t pt-3'>
+					<div className='flex items-center justify-between'>
+						<div>
+							<p className='text-sm font-medium'>Namespaces</p>
+							<p className='text-muted-foreground text-xs'>
+								Manage data partitions for this connection.
+							</p>
+						</div>
+						<Button variant='outline' size='sm' onClick={addNamespaceRow}>
+							<PlusIcon />
+							Add Namespace
+						</Button>
+					</div>
+
+					{isLoadingNamespaces && (
+						<p className='text-muted-foreground text-xs'>Loading namespaces...</p>
+					)}
+
+					{namespaceRows.length === 0 && !isLoadingNamespaces && (
+						<p className='text-muted-foreground text-xs'>
+							No namespaces configured. All Data mode will be used by default.
+						</p>
+					)}
+
+					{namespaceRows.map((row, index) => {
+						const isExisting = Boolean(row.id)
+						return (
+							<div
+								key={row.id ?? `new-${index}`}
+								className='flex items-center gap-2 p-2'
+							>
+								<div>#{index + 1}</div>
+								<Input
+									value={row.name}
+									onChange={(event) =>
+										updateNamespaceRow(index, { name: event.target.value })
+									}
+									placeholder='team-a'
+								/>
+								<select
+									value={row.strategy}
+									disabled={form.engine === 'memcached' || isExisting}
+									onChange={(event) =>
+										updateNamespaceRow(index, {
+											strategy: event.target.value as 'redisLogicalDb' | 'keyPrefix',
+										})
+									}
+									className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs disabled:opacity-60'
+								>
+									{form.engine === 'redis' && (
+										<option value='redisLogicalDb'>Redis Logical DB</option>
+									)}
+									<option value='keyPrefix'>Key Prefix</option>
+								</select>
+								{(form.engine === 'memcached' || row.strategy === 'keyPrefix') && (
+									<Input
+										value={row.keyPrefix}
+										onChange={(event) =>
+											updateNamespaceRow(index, {
+												keyPrefix: event.target.value,
+											})
+										}
+										disabled={isExisting}
+										placeholder='tenant:'
+									/>
+								)}
+								{form.engine === 'redis' && row.strategy === 'redisLogicalDb' && (
+									<Input
+										value={row.dbIndex}
+										onChange={(event) =>
+											updateNamespaceRow(index, {
+												dbIndex: event.target.value,
+											})
+										}
+										disabled={isExisting}
+										placeholder='0'
+									/>
+								)}
+								<Button
+									variant='destructive'
+									size='icon'
+									onClick={() => removeNamespaceRow(index)}
+								>
+									<Trash2Icon />
+								</Button>
+							</div>
+						)
+					})}
+				</div>
+
 				<DialogFooter>
 					<Button
 						variant='outline'
 						onClick={handleTestConnection}
 						disabled={isTesting}
 					>
+						<SearchCheck />
 						{isTesting ? 'Testing...' : 'Test Connection'}
 					</Button>
 					<Button onClick={handleSave} disabled={!canSave || isSaving}>
+						<SaveIcon />
 						{isSaving
 							? 'Saving...'
 							: mode === 'create'
