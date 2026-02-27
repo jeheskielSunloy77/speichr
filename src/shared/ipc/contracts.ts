@@ -14,6 +14,11 @@ import type {
 	ConnectionCreateRequest,
 	ConnectionDeleteRequest,
 	ConnectionGetRequest,
+	NamespaceCreateRequest,
+	NamespaceDeleteRequest,
+	NamespaceListRequest,
+	NamespaceProfile,
+	NamespaceUpdateRequest,
 	ConnectionProfile,
 	ConnectionTestRequest,
 	ConnectionTestResult,
@@ -84,6 +89,9 @@ export type SpeichrCommand =
 	| 'connection.update'
 	| 'connection.delete'
 	| 'connection.test'
+	| 'namespace.create'
+	| 'namespace.update'
+	| 'namespace.delete'
 	| 'key.set'
 	| 'key.delete'
 	| 'rollback.restore'
@@ -112,6 +120,7 @@ export type SpeichrCommand =
 export type SpeichrQuery =
 	| 'connection.list'
 	| 'connection.get'
+	| 'namespace.list'
 	| 'provider.capabilities'
 	| 'key.list'
 	| 'key.search'
@@ -142,6 +151,9 @@ export interface CommandPayloadMap {
 	'connection.update': ConnectionUpdateRequest
 	'connection.delete': ConnectionDeleteRequest
 	'connection.test': ConnectionTestRequest
+	'namespace.create': NamespaceCreateRequest
+	'namespace.update': NamespaceUpdateRequest
+	'namespace.delete': NamespaceDeleteRequest
 	'key.set': KeySetRequest
 	'key.delete': KeyDeleteRequest
 	'rollback.restore': RollbackRestoreRequest
@@ -171,6 +183,7 @@ export interface CommandPayloadMap {
 export interface QueryPayloadMap {
 	'connection.list': Record<string, never>
 	'connection.get': ConnectionGetRequest
+	'namespace.list': NamespaceListRequest
 	'provider.capabilities': ConnectionCapabilitiesRequest
 	'key.list': KeyListRequest
 	'key.search': KeySearchRequest
@@ -202,6 +215,9 @@ export interface CommandResultMap {
 	'connection.update': ConnectionProfile
 	'connection.delete': MutationResult
 	'connection.test': ConnectionTestResult
+	'namespace.create': NamespaceProfile
+	'namespace.update': NamespaceProfile
+	'namespace.delete': MutationResult
 	'key.set': MutationResult
 	'key.delete': MutationResult
 	'rollback.restore': MutationResult
@@ -231,6 +247,7 @@ export interface CommandResultMap {
 export interface QueryResultMap {
 	'connection.list': ConnectionProfile[]
 	'connection.get': ConnectionProfile
+	'namespace.list': NamespaceProfile[]
 	'provider.capabilities': ProviderCapabilities
 	'key.list': KeyListResult
 	'key.search': KeyListResult

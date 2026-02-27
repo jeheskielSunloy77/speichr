@@ -8,6 +8,7 @@ import type {
   AlertListRequest,
   AlertRule,
   ConnectionProfile,
+  NamespaceProfile,
   GovernanceAssignment,
   GovernanceAssignmentListRequest,
   GovernancePolicyPack,
@@ -35,6 +36,7 @@ import type {
   HistoryRepository,
   IncidentBundleRepository,
   MemcachedKeyIndexRepository,
+  NamespaceRepository,
   ObservabilityRepository,
   RetentionRepository,
   SnapshotRepository,
@@ -100,6 +102,19 @@ const runMigrations = (db: BetterSqlite3.Database): void => {
       retry_abort_on_error_rate REAL NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS connection_namespaces (
+      id TEXT PRIMARY KEY,
+      connection_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      engine TEXT NOT NULL,
+      strategy TEXT NOT NULL,
+      db_index INTEGER,
+      key_prefix TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (connection_id) REFERENCES connection_profiles(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS memcached_key_index (
@@ -260,6 +275,10 @@ const runMigrations = (db: BetterSqlite3.Database): void => {
 
     CREATE INDEX IF NOT EXISTS idx_connection_profiles_engine ON connection_profiles(engine);
     CREATE INDEX IF NOT EXISTS idx_connection_profiles_name ON connection_profiles(name);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_namespaces_connection_name_ci
+      ON connection_namespaces(connection_id, lower(name));
+    CREATE INDEX IF NOT EXISTS idx_connection_namespaces_connection_id
+      ON connection_namespaces(connection_id);
     CREATE INDEX IF NOT EXISTS idx_memcached_key_index_connection_id ON memcached_key_index(connection_id);
     CREATE INDEX IF NOT EXISTS idx_key_snapshots_lookup ON key_snapshots(connection_id, cache_key, captured_at DESC);
     CREATE INDEX IF NOT EXISTS idx_workflow_executions_connection ON workflow_executions(connection_id, started_at DESC);
@@ -570,6 +589,147 @@ export class SqliteConnectionRepository implements ConnectionRepository {
       profile.retryAbortOnErrorRate ?? 1,
       profile.createdAt,
       profile.updatedAt,
+    )
+  }
+
+  public async delete(id: string): Promise<void> {
+    this.deleteStatement.run(id)
+  }
+}
+
+type NamespaceRow = {
+  id: string
+  connection_id: string
+  name: string
+  engine: 'redis' | 'memcached'
+  strategy: 'redisLogicalDb' | 'keyPrefix'
+  db_index: number | null
+  key_prefix: string | null
+  created_at: string
+  updated_at: string
+}
+
+const rowToNamespace = (row: NamespaceRow): NamespaceProfile => ({
+  id: row.id,
+  connectionId: row.connection_id,
+  name: row.name,
+  engine: row.engine,
+  strategy: row.strategy,
+  dbIndex: row.db_index ?? undefined,
+  keyPrefix: row.key_prefix ?? undefined,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+})
+
+export class SqliteNamespaceRepository implements NamespaceRepository {
+  private readonly listByConnectionStatement: BetterSqlite3.Statement<
+    [string],
+    NamespaceRow
+  >
+
+  private readonly findByIdStatement: BetterSqlite3.Statement<[string], NamespaceRow>
+
+  private readonly saveStatement: BetterSqlite3.Statement<
+    [
+      string,
+      string,
+      string,
+      'redis' | 'memcached',
+      'redisLogicalDb' | 'keyPrefix',
+      number | null,
+      string | null,
+      string,
+      string,
+    ]
+  >
+
+  private readonly deleteStatement: BetterSqlite3.Statement<[string]>
+
+  public constructor(private readonly db: BetterSqlite3.Database) {
+    this.listByConnectionStatement = this.db.prepare<[string], NamespaceRow>(`
+      SELECT
+        id,
+        connection_id,
+        name,
+        engine,
+        strategy,
+        db_index,
+        key_prefix,
+        created_at,
+        updated_at
+      FROM connection_namespaces
+      WHERE connection_id = ?
+      ORDER BY name COLLATE NOCASE ASC
+    `)
+
+    this.findByIdStatement = this.db.prepare<[string], NamespaceRow>(`
+      SELECT
+        id,
+        connection_id,
+        name,
+        engine,
+        strategy,
+        db_index,
+        key_prefix,
+        created_at,
+        updated_at
+      FROM connection_namespaces
+      WHERE id = ?
+      LIMIT 1
+    `)
+
+    this.saveStatement = this.db.prepare(`
+      INSERT INTO connection_namespaces (
+        id,
+        connection_id,
+        name,
+        engine,
+        strategy,
+        db_index,
+        key_prefix,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        connection_id = excluded.connection_id,
+        name = excluded.name,
+        engine = excluded.engine,
+        strategy = excluded.strategy,
+        db_index = excluded.db_index,
+        key_prefix = excluded.key_prefix,
+        updated_at = excluded.updated_at
+    `)
+
+    this.deleteStatement = this.db.prepare(
+      'DELETE FROM connection_namespaces WHERE id = ?',
+    )
+  }
+
+  public async listByConnectionId(connectionId: string): Promise<NamespaceProfile[]> {
+    const rows = this.listByConnectionStatement.all(connectionId)
+    return rows.map(rowToNamespace)
+  }
+
+  public async findById(id: string): Promise<NamespaceProfile | null> {
+    const row = this.findByIdStatement.get(id)
+    if (!row) {
+      return null
+    }
+
+    return rowToNamespace(row)
+  }
+
+  public async save(namespace: NamespaceProfile): Promise<void> {
+    this.saveStatement.run(
+      namespace.id,
+      namespace.connectionId,
+      namespace.name,
+      namespace.engine,
+      namespace.strategy,
+      namespace.dbIndex ?? null,
+      namespace.keyPrefix ?? null,
+      namespace.createdAt,
+      namespace.updatedAt,
     )
   }
 

@@ -21,6 +21,7 @@ import {
 	SqliteHistoryRepository,
 	SqliteIncidentBundleRepository,
 	SqliteMemcachedKeyIndexRepository,
+	SqliteNamespaceRepository,
 	SqliteObservabilityRepository,
 	SqliteRetentionRepository,
 	SqliteSnapshotRepository,
@@ -51,6 +52,7 @@ const initializeRuntime = (): RuntimeContext => {
 
 	const connectionRepository = new SqliteConnectionRepository(db)
 	const memcachedKeyIndexRepository = new SqliteMemcachedKeyIndexRepository(db)
+	const namespaceRepository = new SqliteNamespaceRepository(db)
 	const snapshotRepository = new SqliteSnapshotRepository(db)
 	const workflowTemplateRepository = new SqliteWorkflowTemplateRepository(db)
 	const workflowExecutionRepository = new SqliteWorkflowExecutionRepository(db)
@@ -104,6 +106,7 @@ const initializeRuntime = (): RuntimeContext => {
 			retentionRepository,
 			notificationPublisher,
 			engineEventIngestor,
+			namespaceRepository,
 		},
 	)
 

@@ -73,6 +73,12 @@ const handleCommand = async (
 			return service.deleteConnection(envelope.payload)
 		case 'connection.test':
 			return service.testConnection(envelope.payload)
+		case 'namespace.create':
+			return service.createNamespace(envelope.payload)
+		case 'namespace.update':
+			return service.updateNamespace(envelope.payload)
+		case 'namespace.delete':
+			return service.deleteNamespace(envelope.payload)
 		case 'key.set':
 			return service.setKey(envelope.payload)
 		case 'key.delete':
@@ -135,6 +141,8 @@ const handleQuery = async (
 			return service.listConnections()
 		case 'connection.get':
 			return service.getConnection(envelope.payload)
+		case 'namespace.list':
+			return service.listNamespaces(envelope.payload)
 		case 'provider.capabilities':
 			return service.getCapabilities(envelope.payload)
 		case 'key.list':

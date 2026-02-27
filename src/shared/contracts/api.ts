@@ -14,6 +14,10 @@ import type {
 	ConnectionCreateRequest,
 	ConnectionDeleteRequest,
 	ConnectionGetRequest,
+	NamespaceCreateRequest,
+	NamespaceDeleteRequest,
+	NamespaceListRequest,
+	NamespaceUpdateRequest,
 	ConnectionTestRequest,
 	ConnectionUpdateRequest,
 	FailedOperationDrilldownRequest,
@@ -59,6 +63,18 @@ export interface SpeichrApi {
 	getConnection: (
 		payload: ConnectionGetRequest,
 	) => Promise<IpcResponseEnvelope<QueryResultMap['connection.get']>>
+	listNamespaces: (
+		payload: NamespaceListRequest,
+	) => Promise<IpcResponseEnvelope<QueryResultMap['namespace.list']>>
+	createNamespace: (
+		payload: NamespaceCreateRequest,
+	) => Promise<IpcResponseEnvelope<CommandResultMap['namespace.create']>>
+	updateNamespace: (
+		payload: NamespaceUpdateRequest,
+	) => Promise<IpcResponseEnvelope<CommandResultMap['namespace.update']>>
+	deleteNamespace: (
+		payload: NamespaceDeleteRequest,
+	) => Promise<IpcResponseEnvelope<CommandResultMap['namespace.delete']>>
 	createConnection: (
 		payload: ConnectionCreateRequest,
 	) => Promise<IpcResponseEnvelope<CommandResultMap['connection.create']>>

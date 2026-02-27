@@ -1,4 +1,5 @@
 export type CacheEngine = 'redis' | 'memcached'
+export type NamespaceStrategy = 'redisLogicalDb' | 'keyPrefix'
 export type EnvironmentTag = 'dev' | 'staging' | 'prod'
 export type EventSource = 'app' | 'engine'
 export type BackoffStrategy = 'fixed' | 'exponential'
@@ -126,6 +127,43 @@ export interface ConnectionGetRequest {
   id: string
 }
 
+export interface NamespaceProfile {
+  id: string
+  connectionId: string
+  name: string
+  engine: CacheEngine
+  strategy: NamespaceStrategy
+  dbIndex?: number
+  keyPrefix?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface NamespaceDraft {
+  connectionId: string
+  name: string
+  strategy: NamespaceStrategy
+  dbIndex?: number
+  keyPrefix?: string
+}
+
+export interface NamespaceListRequest {
+  connectionId: string
+}
+
+export interface NamespaceCreateRequest {
+  namespace: NamespaceDraft
+}
+
+export interface NamespaceUpdateRequest {
+  id: string
+  name: string
+}
+
+export interface NamespaceDeleteRequest {
+  id: string
+}
+
 export interface ConnectionTestRequest {
   connectionId?: string
   profile: ConnectionDraft
@@ -143,12 +181,14 @@ export interface ConnectionCapabilitiesRequest {
 
 export interface KeyListRequest {
   connectionId: string
+  namespaceId?: string
   cursor?: string
   limit: number
 }
 
 export interface KeySearchRequest {
   connectionId: string
+  namespaceId?: string
   pattern: string
   cursor?: string
   limit: number
@@ -156,11 +196,13 @@ export interface KeySearchRequest {
 
 export interface KeyGetRequest {
   connectionId: string
+  namespaceId?: string
   key: string
 }
 
 export interface KeySetRequest {
   connectionId: string
+  namespaceId?: string
   key: string
   value: string
   ttlSeconds?: number
@@ -168,6 +210,7 @@ export interface KeySetRequest {
 
 export interface KeyDeleteRequest {
   connectionId: string
+  namespaceId?: string
   key: string
   guardrailConfirmed?: boolean
 }
@@ -201,12 +244,14 @@ export interface SnapshotRecord {
 
 export interface SnapshotListRequest {
   connectionId: string
+  namespaceId?: string
   key?: string
   limit: number
 }
 
 export interface RollbackRestoreRequest {
   connectionId: string
+  namespaceId?: string
   key: string
   snapshotId?: string
   guardrailConfirmed?: boolean
@@ -246,6 +291,7 @@ export interface WorkflowTemplateDeleteRequest {
 
 export interface WorkflowTemplatePreviewRequest {
   connectionId: string
+  namespaceId?: string
   templateId?: string
   template?: WorkflowTemplateDraft
   parameterOverrides?: Record<string, unknown>
@@ -290,6 +336,7 @@ export interface WorkflowExecutionRecord {
   workflowName: string
   workflowKind: WorkflowKind
   connectionId: string
+  namespaceId?: string
   startedAt: string
   finishedAt?: string
   status: WorkflowExecutionStatus
@@ -306,6 +353,7 @@ export interface WorkflowExecutionRecord {
 
 export interface WorkflowExecuteRequest {
   connectionId: string
+  namespaceId?: string
   templateId?: string
   template?: WorkflowTemplateDraft
   parameterOverrides?: Record<string, unknown>
@@ -328,6 +376,7 @@ export interface WorkflowResumeRequest {
 
 export interface WorkflowExecutionListRequest {
   connectionId?: string
+  namespaceId?: string
   templateId?: string
   limit: number
 }
@@ -354,6 +403,7 @@ export interface HistoryEvent {
 
 export interface HistoryQueryRequest {
   connectionId?: string
+  namespaceId?: string
   from?: string
   to?: string
   limit: number
@@ -407,6 +457,7 @@ export interface ObservabilityDashboard {
 
 export interface ObservabilityDashboardRequest {
   connectionId?: string
+  namespaceId?: string
   from?: string
   to?: string
   intervalMinutes?: number
@@ -415,6 +466,7 @@ export interface ObservabilityDashboardRequest {
 
 export interface KeyspaceActivityRequest {
   connectionId?: string
+  namespaceId?: string
   from: string
   to: string
   intervalMinutes?: number
@@ -446,6 +498,7 @@ export interface KeyspaceActivityView {
 
 export interface FailedOperationDrilldownRequest {
   connectionId?: string
+  namespaceId?: string
   eventId?: string
   from?: string
   to?: string
@@ -468,6 +521,7 @@ export interface FailedOperationDrilldownResult {
 
 export interface ComparePeriodsRequest {
   connectionId?: string
+  namespaceId?: string
   baselineFrom: string
   baselineTo: string
   compareFrom: string
@@ -514,6 +568,7 @@ export interface IncidentBundlePreviewRequest {
   from: string
   to: string
   connectionIds?: string[]
+  namespaceId?: string
   includes: IncidentBundleInclude[]
   redactionProfile: RedactionProfile
 }
@@ -543,6 +598,7 @@ export interface IncidentBundleExportRequest {
   from: string
   to: string
   connectionIds?: string[]
+  namespaceId?: string
   includes: IncidentBundleInclude[]
   redactionProfile: RedactionProfile
   destinationPath?: string
@@ -588,6 +644,7 @@ export interface IncidentExportJob {
 
 export interface IncidentBundleListRequest {
   limit: number
+  namespaceId?: string
 }
 
 export interface AlertEvent {

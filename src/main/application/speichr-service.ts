@@ -26,6 +26,11 @@ import type {
 	ConnectionSecret,
 	ConnectionTestRequest,
 	ConnectionUpdateRequest,
+	NamespaceCreateRequest,
+	NamespaceDeleteRequest,
+	NamespaceListRequest,
+	NamespaceProfile,
+	NamespaceUpdateRequest,
 	FailedOperationDiagnostic,
 	FailedOperationDrilldownRequest,
 	FailedOperationDrilldownResult,
@@ -79,6 +84,7 @@ import type {
 	WorkflowExecutionGetRequest,
 	WorkflowExecutionListRequest,
 	WorkflowExecutionRecord,
+	WorkflowKind,
 	WorkflowRerunRequest,
 	WorkflowResumeRequest,
 	WorkflowStepResult,
@@ -104,6 +110,7 @@ import type {
 	HistoryRepository,
 	IncidentBundleRepository,
 	MemcachedKeyIndexRepository,
+	NamespaceRepository,
 	NotificationPublisher,
 	ObservabilityRepository,
 	RetentionRepository,
@@ -183,6 +190,7 @@ type ServiceDependencies = {
 	retentionRepository: RetentionRepository
 	notificationPublisher: NotificationPublisher
 	engineEventIngestor: EngineEventIngestor
+	namespaceRepository: NamespaceRepository
 }
 
 const BUILTIN_WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
@@ -265,6 +273,28 @@ class InMemorySnapshotRepository implements SnapshotRepository {
 	}
 }
 
+class InMemoryNamespaceRepository implements NamespaceRepository {
+	private readonly records = new Map<string, NamespaceProfile>()
+
+	public async listByConnectionId(connectionId: string): Promise<NamespaceProfile[]> {
+		return Array.from(this.records.values())
+			.filter((record) => record.connectionId === connectionId)
+			.sort((left, right) => left.name.localeCompare(right.name))
+	}
+
+	public async findById(id: string): Promise<NamespaceProfile | null> {
+		return this.records.get(id) ?? null
+	}
+
+	public async save(namespace: NamespaceProfile): Promise<void> {
+		this.records.set(namespace.id, namespace)
+	}
+
+	public async delete(id: string): Promise<void> {
+		this.records.delete(id)
+	}
+}
+
 class InMemoryWorkflowTemplateRepository implements WorkflowTemplateRepository {
 	private readonly records = new Map<string, WorkflowTemplate>()
 
@@ -300,6 +330,8 @@ class InMemoryWorkflowExecutionRepository implements WorkflowExecutionRepository
 				(record) =>
 					(args.connectionId === undefined ||
 						record.connectionId === args.connectionId) &&
+					(args.namespaceId === undefined ||
+						record.namespaceId === args.namespaceId) &&
 					(args.templateId === undefined ||
 						record.workflowTemplateId === args.templateId),
 			)
@@ -625,6 +657,8 @@ export class SpeichrService {
 
 	private readonly engineEventIngestor: EngineEventIngestor
 
+	private readonly namespaceRepository: NamespaceRepository
+
 	private readonly operationSamples = new Map<
 		string,
 		Array<{ timestamp: number; durationMs: number; status: OperationStatus }>
@@ -675,6 +709,8 @@ export class SpeichrService {
 			dependencies?.notificationPublisher ?? new NoopNotificationPublisher()
 		this.engineEventIngestor =
 			dependencies?.engineEventIngestor ?? new NoopEngineEventIngestor()
+		this.namespaceRepository =
+			dependencies?.namespaceRepository ?? new InMemoryNamespaceRepository()
 	}
 
 	public async startEngineEventIngestion(): Promise<void> {
@@ -708,6 +744,83 @@ export class SpeichrService {
 		}
 
 		return profile
+	}
+
+	public async listNamespaces(
+		payload: NamespaceListRequest,
+	): Promise<NamespaceProfile[]> {
+		await this.requireConnection(payload.connectionId)
+		return this.namespaceRepository.listByConnectionId(payload.connectionId)
+	}
+
+	public async createNamespace(
+		payload: NamespaceCreateRequest,
+	): Promise<NamespaceProfile> {
+		const connection = await this.requireConnection(payload.namespace.connectionId)
+		validateNamespaceDraft(payload.namespace, connection.engine)
+
+		const existing = await this.namespaceRepository.listByConnectionId(connection.id)
+		assertNamespaceNameUnique(existing, payload.namespace.name)
+
+		const now = new Date().toISOString()
+		const namespace: NamespaceProfile = {
+			id: uuidv4(),
+			connectionId: connection.id,
+			name: payload.namespace.name.trim(),
+			engine: connection.engine,
+			strategy: payload.namespace.strategy,
+			dbIndex:
+				payload.namespace.strategy === 'redisLogicalDb'
+					? payload.namespace.dbIndex
+					: undefined,
+			keyPrefix:
+				payload.namespace.strategy === 'keyPrefix'
+					? payload.namespace.keyPrefix?.trim()
+					: undefined,
+			createdAt: now,
+			updatedAt: now,
+		}
+
+		await this.namespaceRepository.save(namespace)
+		return namespace
+	}
+
+	public async updateNamespace(
+		payload: NamespaceUpdateRequest,
+	): Promise<NamespaceProfile> {
+		const existing = await this.namespaceRepository.findById(payload.id)
+		if (!existing) {
+			throw new OperationFailure(
+				'VALIDATION_ERROR',
+				'Namespace was not found.',
+				false,
+				{ id: payload.id },
+			)
+		}
+
+		const siblings = await this.namespaceRepository.listByConnectionId(
+			existing.connectionId,
+		)
+		assertNamespaceNameUnique(
+			siblings.filter((namespace) => namespace.id !== existing.id),
+			payload.name,
+		)
+
+		const updated: NamespaceProfile = {
+			...existing,
+			name: payload.name.trim(),
+			updatedAt: new Date().toISOString(),
+		}
+
+		await this.namespaceRepository.save(updated)
+		return updated
+	}
+
+	public async deleteNamespace(
+		payload: NamespaceDeleteRequest,
+	): Promise<MutationResult> {
+		await this.namespaceRepository.delete(payload.id)
+		return { success: true }
 	}
 
 	public async createConnection(
@@ -838,74 +951,98 @@ export class SpeichrService {
 	}
 
 	public async listKeys(payload: KeyListRequest): Promise<KeyListResult> {
-		const { profile, secret } = await this.requireProfileWithSecret(
+		const scope = await this.requireProfileWithSecretAndNamespace(
 			payload.connectionId,
+			payload.namespaceId,
 		)
+		const keyScope = this.createNamespaceKeyScope(scope.namespace)
 
 		const { result } = await this.executeWithPolicy({
-			profile,
+			profile: scope.profile,
 			action: 'key.list',
 			keyOrPattern: payload.cursor ?? '*',
 			run: () =>
-				this.cacheGateway.listKeys(profile, secret, {
+				this.cacheGateway.listKeys(scope.profile, scope.secret, {
 					cursor: payload.cursor,
 					limit: payload.limit,
 				}),
 		})
 
-		return result
+		return {
+			keys: keyScope.mapOutgoingKeys(result.keys),
+			nextCursor: result.nextCursor,
+		}
 	}
 
 	public async searchKeys(payload: KeySearchRequest): Promise<KeyListResult> {
-		const { profile, secret } = await this.requireProfileWithSecret(
+		const scope = await this.requireProfileWithSecretAndNamespace(
 			payload.connectionId,
+			payload.namespaceId,
 		)
+		const keyScope = this.createNamespaceKeyScope(scope.namespace)
+		const scopedPattern = keyScope.mapPatternForQuery(payload.pattern)
 
 		const { result } = await this.executeWithPolicy({
-			profile,
+			profile: scope.profile,
 			action: 'key.search',
 			keyOrPattern: payload.pattern,
 			run: () =>
-				this.cacheGateway.searchKeys(profile, secret, {
-					pattern: payload.pattern,
+				this.cacheGateway.searchKeys(scope.profile, scope.secret, {
+					pattern: scopedPattern,
 					cursor: payload.cursor,
 					limit: payload.limit,
 				}),
 		})
 
-		return result
+		return {
+			keys: keyScope.mapOutgoingKeys(result.keys),
+			nextCursor: result.nextCursor,
+		}
 	}
 
 	public async getKey(payload: KeyGetRequest): Promise<KeyValueRecord> {
-		const { profile, secret } = await this.requireProfileWithSecret(
+		const scope = await this.requireProfileWithSecretAndNamespace(
 			payload.connectionId,
+			payload.namespaceId,
 		)
+		const keyScope = this.createNamespaceKeyScope(scope.namespace)
+		const scopedKey = keyScope.mapKeyForMutation(payload.key)
 
 		const { result } = await this.executeWithPolicy({
-			profile,
+			profile: scope.profile,
 			action: 'key.get',
 			keyOrPattern: payload.key,
-			run: () => this.cacheGateway.getValue(profile, secret, payload.key),
+			run: () =>
+				this.cacheGateway.getValue(scope.profile, scope.secret, scopedKey),
 		})
 
 		return result
 	}
 
 	public async setKey(payload: KeySetRequest): Promise<MutationResult> {
-		const { profile, secret } = await this.requireProfileWithSecret(
+		const scope = await this.requireProfileWithSecretAndNamespace(
 			payload.connectionId,
+			payload.namespaceId,
+		)
+		const keyScope = this.createNamespaceKeyScope(scope.namespace)
+		const scopedKey = keyScope.mapKeyForMutation(payload.key)
+
+		await this.enforceWritable(scope.profile, 'key.set', payload.key)
+		await this.captureSnapshot(
+			scope.profile,
+			scope.secret,
+			payload.key,
+			'set',
+			scopedKey,
 		)
 
-		await this.enforceWritable(profile, 'key.set', payload.key)
-		await this.captureSnapshot(profile, secret, payload.key, 'set')
-
 		await this.executeWithPolicy({
-			profile,
+			profile: scope.profile,
 			action: 'key.set',
 			keyOrPattern: payload.key,
 			run: () =>
-				this.cacheGateway.setValue(profile, secret, {
-					key: payload.key,
+				this.cacheGateway.setValue(scope.profile, scope.secret, {
+					key: scopedKey,
 					value: payload.value,
 					ttlSeconds: payload.ttlSeconds,
 				}),
@@ -917,24 +1054,33 @@ export class SpeichrService {
 	}
 
 	public async deleteKey(payload: KeyDeleteRequest): Promise<MutationResult> {
-		const { profile, secret } = await this.requireProfileWithSecret(
+		const scope = await this.requireProfileWithSecretAndNamespace(
 			payload.connectionId,
+			payload.namespaceId,
 		)
+		const keyScope = this.createNamespaceKeyScope(scope.namespace)
+		const scopedKey = keyScope.mapKeyForMutation(payload.key)
 
-		await this.enforceWritable(profile, 'key.delete', payload.key)
+		await this.enforceWritable(scope.profile, 'key.delete', payload.key)
 		await this.enforceProdGuardrail(
-			profile,
+			scope.profile,
 			'key.delete',
 			payload.key,
 			payload.guardrailConfirmed,
 		)
-		await this.captureSnapshot(profile, secret, payload.key, 'delete')
+		await this.captureSnapshot(
+			scope.profile,
+			scope.secret,
+			payload.key,
+			'delete',
+			scopedKey,
+		)
 
 		await this.executeWithPolicy({
-			profile,
+			profile: scope.profile,
 			action: 'key.delete',
 			keyOrPattern: payload.key,
-			run: () => this.cacheGateway.deleteKey(profile, secret, payload.key),
+			run: () => this.cacheGateway.deleteKey(scope.profile, scope.secret, scopedKey),
 		})
 
 		return {
@@ -957,13 +1103,16 @@ export class SpeichrService {
 	public async restoreSnapshot(
 		payload: RollbackRestoreRequest,
 	): Promise<MutationResult> {
-		const { profile, secret } = await this.requireProfileWithSecret(
+		const scope = await this.requireProfileWithSecretAndNamespace(
 			payload.connectionId,
+			payload.namespaceId,
 		)
+		const keyScope = this.createNamespaceKeyScope(scope.namespace)
+		const scopedKey = keyScope.mapKeyForMutation(payload.key)
 
-		await this.enforceWritable(profile, 'rollback.restore', payload.key)
+		await this.enforceWritable(scope.profile, 'rollback.restore', payload.key)
 		await this.enforceProdGuardrail(
-			profile,
+			scope.profile,
 			'rollback.restore',
 			payload.key,
 			payload.guardrailConfirmed,
@@ -994,17 +1143,17 @@ export class SpeichrService {
 		}
 
 		await this.executeWithPolicy({
-			profile,
+			profile: scope.profile,
 			action: 'rollback.restore',
 			keyOrPattern: snapshot.key,
 			run: async () => {
 				if (snapshot.value === null) {
-					await this.cacheGateway.deleteKey(profile, secret, snapshot.key)
+					await this.cacheGateway.deleteKey(scope.profile, scope.secret, scopedKey)
 					return
 				}
 
-				await this.cacheGateway.setValue(profile, secret, {
-					key: snapshot.key,
+				await this.cacheGateway.setValue(scope.profile, scope.secret, {
+					key: scopedKey,
 					value: snapshot.value,
 					ttlSeconds: snapshot.ttlSeconds,
 				})
@@ -1101,8 +1250,9 @@ export class SpeichrService {
 	public async previewWorkflow(
 		payload: WorkflowTemplatePreviewRequest,
 	): Promise<WorkflowDryRunPreview> {
-		const { profile, secret } = await this.requireProfileWithSecret(
+		const scope = await this.requireProfileWithSecretAndNamespace(
 			payload.connectionId,
+			payload.namespaceId,
 		)
 
 		const { template, parameters } = await this.resolveWorkflowTemplate({
@@ -1111,24 +1261,41 @@ export class SpeichrService {
 			parameterOverrides: payload.parameterOverrides,
 		})
 
-		return this.buildWorkflowPreview(profile, secret, template.kind, parameters, {
-			cursor: payload.cursor,
-			limit: payload.limit,
-		})
+		return this.buildWorkflowPreview(
+			scope.profile,
+			scope.secret,
+			template.kind,
+			applyNamespaceToWorkflowParameters(
+				template.kind,
+				parameters,
+				scope.namespace,
+			),
+			{
+				cursor: payload.cursor,
+				limit: payload.limit,
+			},
+		)
 	}
 
 	public async executeWorkflow(
 		payload: WorkflowExecuteRequest,
 	): Promise<WorkflowExecutionRecord> {
-		const { profile, secret } = await this.requireProfileWithSecret(
+		const scope = await this.requireProfileWithSecretAndNamespace(
 			payload.connectionId,
+			payload.namespaceId,
 		)
+		const { profile, secret } = scope
 
 		const { template, parameters } = await this.resolveWorkflowTemplate({
 			templateId: payload.templateId,
 			template: payload.template,
 			parameterOverrides: payload.parameterOverrides,
 		})
+		const scopedParameters = applyNamespaceToWorkflowParameters(
+			template.kind,
+			parameters,
+			scope.namespace,
+		)
 
 		if (!payload.dryRun) {
 			await this.enforceWritable(profile, 'workflow.execute', template.name)
@@ -1159,11 +1326,12 @@ export class SpeichrService {
 			workflowName: template.name,
 			workflowKind: template.kind,
 			connectionId: profile.id,
+			namespaceId: payload.namespaceId,
 			startedAt: new Date().toISOString(),
 			status: 'running',
 			retryCount: 0,
 			dryRun: Boolean(payload.dryRun),
-			parameters,
+			parameters: scopedParameters,
 			stepResults: [],
 			policyPackId: governanceContext.policyPack?.id,
 			scheduleWindowId: governanceContext.activeWindowId,
@@ -1175,7 +1343,7 @@ export class SpeichrService {
 			profile,
 			secret,
 			template.kind,
-			parameters,
+			scopedParameters,
 			{
 				limit: maxPreviewItems,
 			},
@@ -1291,6 +1459,7 @@ export class SpeichrService {
 
 		return this.executeWorkflow({
 			connectionId: execution.connectionId,
+			namespaceId: execution.namespaceId,
 			templateId: execution.workflowTemplateId,
 			template: execution.workflowTemplateId ? undefined : fallbackTemplate,
 			parameterOverrides: payload.parameterOverrides,
@@ -3108,6 +3277,88 @@ export class SpeichrService {
 		}
 	}
 
+	private async requireProfileWithSecretAndNamespace(
+		id: string,
+		namespaceId?: string,
+	): Promise<{
+		profile: ConnectionProfile
+		secret: ConnectionCreateRequest['secret']
+		namespace: NamespaceProfile | null
+	}> {
+		const { profile, secret } = await this.requireProfileWithSecret(id)
+		const namespace = namespaceId
+			? await this.requireNamespaceForConnection(id, namespaceId)
+			: null
+
+		const scopedProfile: ConnectionProfile =
+			profile.engine === 'redis'
+				? {
+						...profile,
+						dbIndex:
+							namespace && namespace.strategy === 'redisLogicalDb'
+								? namespace.dbIndex ?? 0
+								: 0,
+					}
+				: {
+						...profile,
+						dbIndex: undefined,
+					}
+
+		return {
+			profile: scopedProfile,
+			secret,
+			namespace,
+		}
+	}
+
+	private createNamespaceKeyScope(namespace: NamespaceProfile | null): {
+		mapKeyForMutation: (key: string) => string
+		mapPatternForQuery: (pattern: string) => string
+		mapOutgoingKeys: (keys: string[]) => string[]
+	} {
+		const prefix =
+			namespace && namespace.strategy === 'keyPrefix'
+				? namespace.keyPrefix ?? ''
+				: ''
+
+		if (!prefix) {
+			return {
+				mapKeyForMutation: (key) => key,
+				mapPatternForQuery: (pattern) => pattern,
+				mapOutgoingKeys: (keys) => keys,
+			}
+		}
+
+		return {
+			mapKeyForMutation: (key) => `${prefix}${key}`,
+			mapPatternForQuery: (pattern) => `${prefix}${pattern}`,
+			mapOutgoingKeys: (keys) =>
+				keys
+					.filter((key) => key.startsWith(prefix))
+					.map((key) => key.slice(prefix.length)),
+		}
+	}
+
+	private async requireNamespaceForConnection(
+		connectionId: string,
+		namespaceId: string,
+	): Promise<NamespaceProfile> {
+		const namespace = await this.namespaceRepository.findById(namespaceId)
+		if (!namespace || namespace.connectionId !== connectionId) {
+			throw new OperationFailure(
+				'VALIDATION_ERROR',
+				'Namespace was not found for the selected connection.',
+				false,
+				{
+					connectionId,
+					namespaceId,
+				},
+			)
+		}
+
+		return namespace
+	}
+
 	private async resolveTestSecret(
 		payload: ConnectionTestRequest,
 	): Promise<ConnectionCreateRequest['secret']> {
@@ -3182,9 +3433,14 @@ export class SpeichrService {
 		secret: ConnectionSecret,
 		key: string,
 		reason: SnapshotRecord['reason'],
+		resolvedKey: string = key,
 	): Promise<void> {
 		try {
-			const valueRecord = await this.cacheGateway.getValue(profile, secret, key)
+			const valueRecord = await this.cacheGateway.getValue(
+				profile,
+				secret,
+				resolvedKey,
+			)
 
 			if (valueRecord.value === null && valueRecord.ttlSeconds === null) {
 				return
@@ -3920,7 +4176,7 @@ const normalizeDraft = (
 	engine: draft.engine,
 	host: draft.host.trim(),
 	port: draft.port,
-	dbIndex: draft.engine === 'redis' ? draft.dbIndex : undefined,
+	dbIndex: undefined,
 	tlsEnabled: draft.tlsEnabled,
 	environment: draft.environment,
 	tags: normalizeTags(draft.tags),
@@ -3947,6 +4203,118 @@ const normalizeDraft = (
 		DEFAULT_RETRY_ABORT_ON_ERROR_RATE,
 	),
 })
+
+const validateNamespaceDraft = (
+	draft: NamespaceCreateRequest['namespace'],
+	engine: ConnectionProfile['engine'],
+): void => {
+	const normalizedName = draft.name.trim()
+	if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(normalizedName)) {
+		throw new OperationFailure(
+			'VALIDATION_ERROR',
+			'Namespace name must be slug-like and 1-64 characters.',
+			false,
+		)
+	}
+
+	if (engine === 'memcached' && draft.strategy !== 'keyPrefix') {
+		throw new OperationFailure(
+			'VALIDATION_ERROR',
+			'Memcached namespaces only support keyPrefix strategy.',
+			false,
+		)
+	}
+
+	if (draft.strategy === 'redisLogicalDb') {
+		if (engine !== 'redis') {
+			throw new OperationFailure(
+				'VALIDATION_ERROR',
+				'redisLogicalDb strategy is only available for redis connections.',
+				false,
+			)
+		}
+		if (typeof draft.dbIndex !== 'number' || draft.dbIndex < 0 || draft.dbIndex > 15) {
+			throw new OperationFailure(
+				'VALIDATION_ERROR',
+				'Redis logical-db namespaces require dbIndex in range 0-15.',
+				false,
+			)
+		}
+		return
+	}
+
+	if (!draft.keyPrefix || draft.keyPrefix.trim().length === 0) {
+		throw new OperationFailure(
+			'VALIDATION_ERROR',
+			'Prefix namespaces require a key prefix value.',
+			false,
+		)
+	}
+}
+
+const assertNamespaceNameUnique = (
+	namespaces: NamespaceProfile[],
+	name: string,
+): void => {
+	const needle = name.trim().toLowerCase()
+	const conflict = namespaces.some(
+		(namespace) => namespace.name.trim().toLowerCase() === needle,
+	)
+	if (conflict) {
+		throw new OperationFailure(
+			'CONFLICT',
+			'A namespace with this name already exists for the connection.',
+			false,
+		)
+	}
+}
+
+const applyNamespaceToWorkflowParameters = (
+	kind: WorkflowKind,
+	parameters: Record<string, unknown>,
+	namespace: NamespaceProfile | null,
+): Record<string, unknown> => {
+	if (!namespace || namespace.strategy !== 'keyPrefix') {
+		return parameters
+	}
+
+	const prefix = namespace.keyPrefix ?? ''
+	if (!prefix) {
+		return parameters
+	}
+
+	if (kind === 'deleteByPattern' || kind === 'ttlNormalize') {
+		const rawPattern =
+			typeof parameters.pattern === 'string' ? parameters.pattern : '*'
+		return {
+			...parameters,
+			pattern: `${prefix}${rawPattern}`,
+		}
+	}
+
+	if (kind === 'warmupSet' && Array.isArray(parameters.entries)) {
+		return {
+			...parameters,
+			entries: parameters.entries.map((entry) => {
+				if (
+					!entry ||
+					typeof entry !== 'object' ||
+					!('key' in entry) ||
+					typeof entry.key !== 'string'
+				) {
+					return entry
+				}
+
+				return {
+					...(entry as Record<string, unknown>),
+					key: `${prefix}${entry.key}`,
+				}
+			}),
+		}
+	}
+
+	return parameters
+}
 
 const normalizeTags = (tags: string[]): string[] => {
 	const normalized = tags

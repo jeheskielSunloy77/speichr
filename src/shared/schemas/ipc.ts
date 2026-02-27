@@ -3,6 +3,7 @@ import { z } from 'zod'
 export const correlationIdSchema = z.string().min(1)
 
 export const engineSchema = z.enum(['redis', 'memcached'])
+export const namespaceStrategySchema = z.enum(['redisLogicalDb', 'keyPrefix'])
 export const environmentSchema = z.enum(['dev', 'staging', 'prod'])
 export const backoffStrategySchema = z.enum(['fixed', 'exponential'])
 export const workflowKindSchema = z.enum([
@@ -101,6 +102,75 @@ const connectionDeletePayloadSchema = z
 
 const connectionGetPayloadSchema = connectionDeletePayloadSchema
 
+const namespaceDraftSchema = z
+  .object({
+    connectionId: idSchema,
+    name: z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]{0,63}$/),
+    strategy: namespaceStrategySchema,
+    dbIndex: z.number().int().min(0).max(15).optional(),
+    keyPrefix: z.string().min(1).max(255).optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.strategy === 'redisLogicalDb') {
+      if (typeof value.dbIndex !== 'number') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['dbIndex'],
+          message: 'dbIndex is required for redisLogicalDb strategy',
+        })
+      }
+      if (typeof value.keyPrefix === 'string') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['keyPrefix'],
+          message: 'keyPrefix is not supported for redisLogicalDb strategy',
+        })
+      }
+      return
+    }
+
+    if (typeof value.keyPrefix !== 'string') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['keyPrefix'],
+        message: 'keyPrefix is required for keyPrefix strategy',
+      })
+    }
+    if (typeof value.dbIndex === 'number') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['dbIndex'],
+        message: 'dbIndex is not supported for keyPrefix strategy',
+      })
+    }
+  })
+
+const namespaceListPayloadSchema = z
+  .object({
+    connectionId: idSchema,
+  })
+  .strict()
+
+const namespaceCreatePayloadSchema = z
+  .object({
+    namespace: namespaceDraftSchema,
+  })
+  .strict()
+
+const namespaceUpdatePayloadSchema = z
+  .object({
+    id: idSchema,
+    name: z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]{0,63}$/),
+  })
+  .strict()
+
+const namespaceDeletePayloadSchema = z
+  .object({
+    id: idSchema,
+  })
+  .strict()
+
 const connectionTestPayloadSchema = z
   .object({
     connectionId: idSchema.optional(),
@@ -118,6 +188,7 @@ const capabilityPayloadSchema = z
 const keyListPayloadSchema = z
   .object({
     connectionId: idSchema,
+    namespaceId: idSchema.optional(),
     cursor: z.string().optional(),
     limit: z.number().int().min(1).max(500),
   })
@@ -126,6 +197,7 @@ const keyListPayloadSchema = z
 const keySearchPayloadSchema = z
   .object({
     connectionId: idSchema,
+    namespaceId: idSchema.optional(),
     pattern: z.string().min(1),
     cursor: z.string().optional(),
     limit: z.number().int().min(1).max(500),
@@ -135,6 +207,7 @@ const keySearchPayloadSchema = z
 const keyGetPayloadSchema = z
   .object({
     connectionId: idSchema,
+    namespaceId: idSchema.optional(),
     key: z.string().min(1),
   })
   .strict()
@@ -142,6 +215,7 @@ const keyGetPayloadSchema = z
 const keySetPayloadSchema = z
   .object({
     connectionId: idSchema,
+    namespaceId: idSchema.optional(),
     key: z.string().min(1),
     value: z.string(),
     ttlSeconds: z.number().int().min(1).max(31536000).optional(),
@@ -151,6 +225,7 @@ const keySetPayloadSchema = z
 const keyDeletePayloadSchema = z
   .object({
     connectionId: idSchema,
+    namespaceId: idSchema.optional(),
     key: z.string().min(1),
     guardrailConfirmed: z.boolean().optional(),
   })
@@ -159,6 +234,7 @@ const keyDeletePayloadSchema = z
 const snapshotListPayloadSchema = z
   .object({
     connectionId: idSchema,
+    namespaceId: idSchema.optional(),
     key: z.string().min(1).optional(),
     limit: z.number().int().min(1).max(200),
   })
@@ -167,6 +243,7 @@ const snapshotListPayloadSchema = z
 const rollbackRestorePayloadSchema = z
   .object({
     connectionId: idSchema,
+    namespaceId: idSchema.optional(),
     key: z.string().min(1),
     snapshotId: idSchema.optional(),
     guardrailConfirmed: z.boolean().optional(),
@@ -214,6 +291,7 @@ const workflowRetryPolicySchema = z
 const workflowPreviewPayloadSchema = z
   .object({
     connectionId: idSchema,
+    namespaceId: idSchema.optional(),
     templateId: idSchema.optional(),
     template: workflowTemplateDraftSchema.optional(),
     parameterOverrides: z.record(z.string(), z.unknown()).optional(),
@@ -234,6 +312,7 @@ const workflowPreviewPayloadSchema = z
 const workflowExecutePayloadSchema = z
   .object({
     connectionId: idSchema,
+    namespaceId: idSchema.optional(),
     templateId: idSchema.optional(),
     template: workflowTemplateDraftSchema.optional(),
     parameterOverrides: z.record(z.string(), z.unknown()).optional(),
@@ -379,6 +458,7 @@ const incidentBundleBasePayloadSchema = z
     from: z.string().min(1),
     to: z.string().min(1),
     connectionIds: z.array(idSchema).optional(),
+    namespaceId: idSchema.optional(),
     includes: z.array(incidentBundleIncludeSchema).min(1),
     redactionProfile: redactionProfileSchema,
   })
@@ -403,6 +483,7 @@ const incidentBundleExportJobPayloadSchema = z
 const workflowExecutionListPayloadSchema = z
   .object({
     connectionId: idSchema.optional(),
+    namespaceId: idSchema.optional(),
     templateId: idSchema.optional(),
     limit: z.number().int().min(1).max(500),
   })
@@ -417,6 +498,7 @@ const workflowExecutionGetPayloadSchema = z
 const historyListPayloadSchema = z
   .object({
     connectionId: idSchema.optional(),
+    namespaceId: idSchema.optional(),
     from: z.string().optional(),
     to: z.string().optional(),
     limit: z.number().int().min(1).max(1000),
@@ -426,6 +508,7 @@ const historyListPayloadSchema = z
 const observabilityDashboardPayloadSchema = z
   .object({
     connectionId: idSchema.optional(),
+    namespaceId: idSchema.optional(),
     from: z.string().optional(),
     to: z.string().optional(),
     intervalMinutes: z.number().int().min(1).max(1440).optional(),
@@ -436,6 +519,7 @@ const observabilityDashboardPayloadSchema = z
 const keyspaceActivityPayloadSchema = z
   .object({
     connectionId: idSchema.optional(),
+    namespaceId: idSchema.optional(),
     from: z.string().min(1),
     to: z.string().min(1),
     intervalMinutes: z.number().int().min(1).max(1440).optional(),
@@ -446,6 +530,7 @@ const keyspaceActivityPayloadSchema = z
 const failedOperationDrilldownPayloadSchema = z
   .object({
     connectionId: idSchema.optional(),
+    namespaceId: idSchema.optional(),
     eventId: idSchema.optional(),
     from: z.string().optional(),
     to: z.string().optional(),
@@ -456,6 +541,7 @@ const failedOperationDrilldownPayloadSchema = z
 const comparePeriodsPayloadSchema = z
   .object({
     connectionId: idSchema.optional(),
+    namespaceId: idSchema.optional(),
     baselineFrom: z.string().min(1),
     baselineTo: z.string().min(1),
     compareFrom: z.string().min(1),
@@ -489,6 +575,7 @@ const governanceAssignmentListPayloadSchema = z
 const incidentBundleListPayloadSchema = z
   .object({
     limit: z.number().int().min(1).max(500),
+    namespaceId: idSchema.optional(),
   })
   .strict()
 
@@ -518,6 +605,27 @@ export const commandEnvelopeSchema = z.discriminatedUnion('command', [
     .object({
       command: z.literal('connection.test'),
       payload: connectionTestPayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal('namespace.create'),
+      payload: namespaceCreatePayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal('namespace.update'),
+      payload: namespaceUpdatePayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal('namespace.delete'),
+      payload: namespaceDeletePayloadSchema,
       correlationId: correlationIdSchema,
     })
     .strict(),
@@ -703,6 +811,13 @@ export const queryEnvelopeSchema = z.discriminatedUnion('query', [
     .object({
       query: z.literal('connection.get'),
       payload: connectionGetPayloadSchema,
+      correlationId: correlationIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      query: z.literal('namespace.list'),
+      payload: namespaceListPayloadSchema,
       correlationId: correlationIdSchema,
     })
     .strict(),

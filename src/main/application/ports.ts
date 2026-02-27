@@ -2,6 +2,7 @@ import type {
   AlertEvent,
   AlertListRequest,
   AlertRule,
+  NamespaceProfile,
   ConnectionDraft,
   ConnectionProfile,
   ConnectionSecret,
@@ -31,6 +32,13 @@ export interface ConnectionRepository {
   list: () => Promise<ConnectionProfile[]>
   findById: (id: string) => Promise<ConnectionProfile | null>
   save: (profile: ConnectionProfile) => Promise<void>
+  delete: (id: string) => Promise<void>
+}
+
+export interface NamespaceRepository {
+  listByConnectionId: (connectionId: string) => Promise<NamespaceProfile[]>
+  findById: (id: string) => Promise<NamespaceProfile | null>
+  save: (namespace: NamespaceProfile) => Promise<void>
   delete: (id: string) => Promise<void>
 }
 
