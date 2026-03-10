@@ -15,6 +15,13 @@ import { Checkbox } from '@/renderer/components/ui/checkbox'
 import { Input } from '@/renderer/components/ui/input'
 import { Label } from '@/renderer/components/ui/label'
 import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from '@/renderer/components/ui/select'
+import {
 	Table,
 	TableBody,
 	TableCell,
@@ -427,12 +434,9 @@ export const WorkflowPanel = ({
 				<CardContent className="space-y-3">
 					<div className="space-y-1.5">
 						<Label htmlFor="workflow-template-select">Template</Label>
-						<select
-							id="workflow-template-select"
-							className="border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs"
+						<Select
 							value={selectedTemplateId}
-							onChange={(event) => {
-								const nextId = event.target.value
+							onValueChange={(nextId) => {
 								setSelectedTemplateId(nextId)
 								setPreview(null)
 
@@ -450,14 +454,19 @@ export const WorkflowPanel = ({
 								}
 							}}
 						>
-							<option value="inline">Inline template</option>
-							{(templatesQuery.data ?? []).map((template) => (
-								<option key={template.id} value={template.id}>
-									{template.name}
-									{isBuiltinTemplate(template.id) ? ' (built-in)' : ''}
-								</option>
-							))}
-						</select>
+							<SelectTrigger id="workflow-template-select" className="w-full">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="inline">Inline template</SelectItem>
+								{(templatesQuery.data ?? []).map((template) => (
+									<SelectItem key={template.id} value={template.id}>
+										{template.name}
+										{isBuiltinTemplate(template.id) ? ' (built-in)' : ''}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
 					</div>
 
 					<div className="grid gap-3 md:grid-cols-2">
@@ -472,20 +481,23 @@ export const WorkflowPanel = ({
 
 						<div className="space-y-1.5">
 							<Label htmlFor="workflow-template-kind">Template Kind</Label>
-							<select
-								id="workflow-template-kind"
-								className="border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs"
+							<Select
 								value={templateKind}
-								onChange={(event) =>
-									setTemplateKind(
-										event.target.value as WorkflowTemplateDraft['kind'],
-									)
+								onValueChange={(value) =>
+									setTemplateKind(value as WorkflowTemplateDraft['kind'])
 								}
 							>
-								<option value="deleteByPattern">Delete by pattern</option>
-								<option value="ttlNormalize">TTL normalize</option>
-								<option value="warmupSet">Warmup set</option>
-							</select>
+								<SelectTrigger id="workflow-template-kind" className="w-full">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="deleteByPattern">
+										Delete by pattern
+									</SelectItem>
+									<SelectItem value="ttlNormalize">TTL normalize</SelectItem>
+									<SelectItem value="warmupSet">Warmup set</SelectItem>
+								</SelectContent>
+							</Select>
 						</div>
 					</div>
 
@@ -529,19 +541,20 @@ export const WorkflowPanel = ({
 								<Label htmlFor="workflow-retry-strategy">
 									Backoff strategy
 								</Label>
-								<select
-									id="workflow-retry-strategy"
-									className="border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs"
+								<Select
 									value={retryStrategy}
-									onChange={(event) =>
-										setRetryStrategy(
-											event.target.value as 'fixed' | 'exponential',
-										)
+									onValueChange={(value) =>
+										setRetryStrategy(value as 'fixed' | 'exponential')
 									}
 								>
-									<option value="fixed">Fixed</option>
-									<option value="exponential">Exponential</option>
-								</select>
+									<SelectTrigger id="workflow-retry-strategy" className="w-full">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="fixed">Fixed</SelectItem>
+										<SelectItem value="exponential">Exponential</SelectItem>
+									</SelectContent>
+								</Select>
 							</div>
 
 							<div className="space-y-1.5">

@@ -3,6 +3,13 @@ import * as React from 'react'
 import { Badge } from '@/renderer/components/ui/badge'
 import { Checkbox } from '@/renderer/components/ui/checkbox'
 import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from '@/renderer/components/ui/select'
+import {
 	Table,
 	TableBody,
 	TableCell,
@@ -158,30 +165,36 @@ export const KeyValueVisualizer = ({ keyId, value }: KeyValueVisualizerProps) =>
 			<div className='flex flex-wrap items-center gap-2 text-xs'>
 				<label className='flex items-center gap-1'>
 					<span className='text-muted-foreground'>View</span>
-					<select
+					<Select
 						value={mode}
-						onChange={(event) => setMode(event.target.value as VisualizerMode)}
-						className='border-input dark:bg-input/30 h-8 rounded-none border bg-transparent px-2 text-xs'
+						onValueChange={(value) => setMode(value as VisualizerMode)}
 					>
-						<option value='auto'>{autoModeLabel}</option>
-						<option value='raw'>Raw</option>
-						<option value='json'>JSON</option>
-						<option value='dsv'>Delimiter-separated</option>
-					</select>
+						<SelectTrigger className='w-44'>
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value='auto'>{autoModeLabel}</SelectItem>
+							<SelectItem value='raw'>Raw</SelectItem>
+							<SelectItem value='json'>JSON</SelectItem>
+							<SelectItem value='dsv'>Delimiter-separated</SelectItem>
+						</SelectContent>
+					</Select>
 				</label>
 				{(activeType === 'json' || mode === 'json') && (
 					<label className='flex items-center gap-1'>
 						<span className='text-muted-foreground'>JSON view</span>
-						<select
+						<Select
 							value={jsonRenderMode}
-							onChange={(event) =>
-								setJsonRenderMode(event.target.value as JsonRenderMode)
-							}
-							className='border-input dark:bg-input/30 h-8 rounded-none border bg-transparent px-2 text-xs'
+							onValueChange={(value) => setJsonRenderMode(value as JsonRenderMode)}
 						>
-							<option value='structured'>Structured</option>
-							<option value='pretty'>Pretty JSON</option>
-						</select>
+							<SelectTrigger className='w-36'>
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value='structured'>Structured</SelectItem>
+								<SelectItem value='pretty'>Pretty JSON</SelectItem>
+							</SelectContent>
+						</Select>
 					</label>
 				)}
 				{(activeType === 'dsv' || mode === 'dsv') && (

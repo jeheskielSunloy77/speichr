@@ -12,6 +12,13 @@ import {
 } from '@/renderer/components/ui/dialog'
 import { Input } from '@/renderer/components/ui/input'
 import { Label } from '@/renderer/components/ui/label'
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from '@/renderer/components/ui/select'
 import { Switch } from '@/renderer/components/ui/switch'
 import { unwrapResponse } from '@/renderer/features/common/ipc'
 import type {
@@ -398,11 +405,10 @@ export const ConnectionFormDialog = ({
 
 					<div className='space-y-1.5'>
 						<Label htmlFor='connection-engine'>Engine</Label>
-						<select
-							id='connection-engine'
+						<Select
 							value={form.engine}
-							onChange={(event) => {
-								const nextEngine = event.target.value as FormState['engine']
+							onValueChange={(value) => {
+								const nextEngine = value as FormState['engine']
 								onFieldChange('engine', nextEngine)
 								setNamespaceRows((previous) =>
 									previous.map((row) =>
@@ -415,11 +421,15 @@ export const ConnectionFormDialog = ({
 									),
 								)
 							}}
-							className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
 						>
-							<option value='redis'>Redis</option>
-							<option value='memcached'>Memcached</option>
-						</select>
+							<SelectTrigger id='connection-engine' className='w-full'>
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value='redis'>Redis</SelectItem>
+								<SelectItem value='memcached'>Memcached</SelectItem>
+							</SelectContent>
+						</Select>
 					</div>
 
 					<div className='space-y-1.5'>
@@ -444,21 +454,24 @@ export const ConnectionFormDialog = ({
 
 					<div className='space-y-1.5'>
 						<Label htmlFor='connection-environment'>Environment</Label>
-						<select
-							id='connection-environment'
+						<Select
 							value={form.environment}
-							onChange={(event) =>
+							onValueChange={(value) =>
 								onFieldChange(
 									'environment',
-									event.target.value as FormState['environment'],
+									value as FormState['environment'],
 								)
 							}
-							className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
 						>
-							<option value='dev'>dev</option>
-							<option value='staging'>staging</option>
-							<option value='prod'>prod</option>
-						</select>
+							<SelectTrigger id='connection-environment' className='w-full'>
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value='dev'>dev</SelectItem>
+								<SelectItem value='staging'>staging</SelectItem>
+								<SelectItem value='prod'>prod</SelectItem>
+							</SelectContent>
+						</Select>
 					</div>
 
 					<div className='space-y-1.5'>
@@ -492,20 +505,23 @@ export const ConnectionFormDialog = ({
 
 					<div className='space-y-1.5'>
 						<Label htmlFor='connection-retry-strategy'>Backoff strategy</Label>
-						<select
-							id='connection-retry-strategy'
+						<Select
 							value={form.retryBackoffStrategy}
-							onChange={(event) =>
+							onValueChange={(value) =>
 								onFieldChange(
 									'retryBackoffStrategy',
-									event.target.value as FormState['retryBackoffStrategy'],
+									value as FormState['retryBackoffStrategy'],
 								)
 							}
-							className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
 						>
-							<option value='fixed'>fixed</option>
-							<option value='exponential'>exponential</option>
-						</select>
+							<SelectTrigger id='connection-retry-strategy' className='w-full'>
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value='fixed'>fixed</SelectItem>
+								<SelectItem value='exponential'>exponential</SelectItem>
+							</SelectContent>
+						</Select>
 					</div>
 
 					<div className='space-y-1.5'>
@@ -616,21 +632,27 @@ export const ConnectionFormDialog = ({
 									}
 									placeholder='team-a'
 								/>
-								<select
+								<Select
 									value={row.strategy}
 									disabled={form.engine === 'memcached' || isExisting}
-									onChange={(event) =>
+									onValueChange={(value) =>
 										updateNamespaceRow(index, {
-											strategy: event.target.value as 'redisLogicalDb' | 'keyPrefix',
+											strategy: value as 'redisLogicalDb' | 'keyPrefix',
 										})
 									}
-									className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs disabled:opacity-60'
 								>
-									{form.engine === 'redis' && (
-										<option value='redisLogicalDb'>Redis Logical DB</option>
-									)}
-									<option value='keyPrefix'>Key Prefix</option>
-								</select>
+									<SelectTrigger className='w-full disabled:opacity-60'>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{form.engine === 'redis' && (
+											<SelectItem value='redisLogicalDb'>
+												Redis Logical DB
+											</SelectItem>
+										)}
+										<SelectItem value='keyPrefix'>Key Prefix</SelectItem>
+									</SelectContent>
+								</Select>
 								{(form.engine === 'memcached' || row.strategy === 'keyPrefix') && (
 									<Input
 										value={row.keyPrefix}

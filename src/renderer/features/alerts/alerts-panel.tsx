@@ -14,6 +14,13 @@ import {
 import { Checkbox } from '@/renderer/components/ui/checkbox'
 import { Input } from '@/renderer/components/ui/input'
 import { Label } from '@/renderer/components/ui/label'
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from '@/renderer/components/ui/select'
 import { unwrapResponse } from '@/renderer/features/common/ipc'
 import type { AlertRule, ConnectionProfile } from '@/shared/contracts/cache'
 
@@ -234,22 +241,27 @@ export const AlertsPanel = ({ connection }: AlertsPanelProps) => {
 						</div>
 						<div className='space-y-1.5'>
 							<Label htmlFor='alert-rule-metric'>Metric</Label>
-							<select
-								id='alert-rule-metric'
-								className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
+							<Select
 								value={ruleForm.metric}
-								onChange={(event) =>
+								onValueChange={(value) =>
 									setRuleForm((current) => ({
 										...current,
-										metric: event.target.value as AlertRule['metric'],
+										metric: value as AlertRule['metric'],
 									}))
 								}
 							>
-								<option value='errorRate'>errorRate</option>
-								<option value='latencyP95Ms'>latencyP95Ms</option>
-								<option value='slowOperationCount'>slowOperationCount</option>
-								<option value='failedOperationCount'>failedOperationCount</option>
-							</select>
+								<SelectTrigger id='alert-rule-metric' className='w-full'>
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value='errorRate'>errorRate</SelectItem>
+									<SelectItem value='latencyP95Ms'>latencyP95Ms</SelectItem>
+									<SelectItem value='slowOperationCount'>slowOperationCount</SelectItem>
+									<SelectItem value='failedOperationCount'>
+										failedOperationCount
+									</SelectItem>
+								</SelectContent>
+							</Select>
 						</div>
 						<div className='space-y-1.5'>
 							<Label htmlFor='alert-rule-threshold'>Threshold</Label>
@@ -279,40 +291,46 @@ export const AlertsPanel = ({ connection }: AlertsPanelProps) => {
 						</div>
 						<div className='space-y-1.5'>
 							<Label htmlFor='alert-rule-severity'>Severity</Label>
-							<select
-								id='alert-rule-severity'
-								className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
+							<Select
 								value={ruleForm.severity}
-								onChange={(event) =>
+								onValueChange={(value) =>
 									setRuleForm((current) => ({
 										...current,
-										severity: event.target.value as AlertRule['severity'],
+										severity: value as AlertRule['severity'],
 									}))
 								}
 							>
-								<option value='info'>info</option>
-								<option value='warning'>warning</option>
-								<option value='critical'>critical</option>
-							</select>
+								<SelectTrigger id='alert-rule-severity' className='w-full'>
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value='info'>info</SelectItem>
+									<SelectItem value='warning'>warning</SelectItem>
+									<SelectItem value='critical'>critical</SelectItem>
+								</SelectContent>
+							</Select>
 						</div>
 						<div className='space-y-1.5'>
 							<Label htmlFor='alert-rule-environment'>Environment Scope</Label>
-							<select
-								id='alert-rule-environment'
-								className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
+							<Select
 								value={ruleForm.environment}
-								onChange={(event) =>
+								onValueChange={(value) =>
 									setRuleForm((current) => ({
 										...current,
-										environment: event.target.value as RuleFormState['environment'],
+										environment: value as RuleFormState['environment'],
 									}))
 								}
 							>
-								<option value=''>all</option>
-								<option value='dev'>dev</option>
-								<option value='staging'>staging</option>
-								<option value='prod'>prod</option>
-							</select>
+								<SelectTrigger id='alert-rule-environment' className='w-full'>
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value=''>all</SelectItem>
+									<SelectItem value='dev'>dev</SelectItem>
+									<SelectItem value='staging'>staging</SelectItem>
+									<SelectItem value='prod'>prod</SelectItem>
+								</SelectContent>
+							</Select>
 						</div>
 					</div>
 

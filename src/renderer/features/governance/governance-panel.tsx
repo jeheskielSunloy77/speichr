@@ -15,6 +15,13 @@ import { Checkbox } from '@/renderer/components/ui/checkbox'
 import { Input } from '@/renderer/components/ui/input'
 import { Label } from '@/renderer/components/ui/label'
 import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from '@/renderer/components/ui/select'
+import {
 	Table,
 	TableBody,
 	TableCell,
@@ -523,18 +530,22 @@ export const GovernancePanel = ({
 					<p className='text-xs'>
 						<span className='font-medium'>Connection:</span> {connection.name}
 					</p>
-					<select
-						className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
+					<Select
 						value={selectedAssignedPolicyPackId}
-						onChange={(event) => setSelectedAssignedPolicyPackId(event.target.value)}
+						onValueChange={setSelectedAssignedPolicyPackId}
 					>
-						<option value='none'>No policy pack assigned</option>
-						{(policyPacksQuery.data ?? []).map((policyPack) => (
-							<option key={policyPack.id} value={policyPack.id}>
-								{policyPack.name}
-							</option>
-						))}
-					</select>
+						<SelectTrigger className='w-full'>
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value='none'>No policy pack assigned</SelectItem>
+							{(policyPacksQuery.data ?? []).map((policyPack) => (
+								<SelectItem key={policyPack.id} value={policyPack.id}>
+									{policyPack.name}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
 
 					<div className='flex flex-wrap gap-2'>
 						<Button
@@ -870,18 +881,24 @@ export const GovernancePanel = ({
 					</CardHeader>
 					<CardContent className='space-y-3'>
 						<div className='grid gap-3 md:grid-cols-3'>
-							<select
-								className='border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs'
+							<Select
 								value={purgeDataset}
-								onChange={(event) =>
-									setPurgeDataset(event.target.value as RetentionPolicy['dataset'])
+								onValueChange={(value) =>
+									setPurgeDataset(value as RetentionPolicy['dataset'])
 								}
 							>
-								<option value='timelineEvents'>timelineEvents</option>
-								<option value='observabilitySnapshots'>observabilitySnapshots</option>
-								<option value='workflowHistory'>workflowHistory</option>
-								<option value='incidentArtifacts'>incidentArtifacts</option>
-							</select>
+								<SelectTrigger className='w-full'>
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value='timelineEvents'>timelineEvents</SelectItem>
+									<SelectItem value='observabilitySnapshots'>
+										observabilitySnapshots
+									</SelectItem>
+									<SelectItem value='workflowHistory'>workflowHistory</SelectItem>
+									<SelectItem value='incidentArtifacts'>incidentArtifacts</SelectItem>
+								</SelectContent>
+							</Select>
 							<Input
 								type='datetime-local'
 								value={purgeOlderThan}

@@ -15,6 +15,13 @@ import { Checkbox } from '@/renderer/components/ui/checkbox'
 import { Input } from '@/renderer/components/ui/input'
 import { Label } from '@/renderer/components/ui/label'
 import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from '@/renderer/components/ui/select'
+import {
 	Table,
 	TableBody,
 	TableCell,
@@ -475,15 +482,19 @@ export const ObservabilityPanel = ({
 									</CardDescription>
 								</div>
 								<div className="flex items-center gap-2">
-									<select
-										className="border-input dark:bg-input/30 h-8 rounded-none border bg-transparent px-2.5 text-xs"
+									<Select
 										value={intervalMinutes}
-										onChange={(event) => setIntervalMinutes(event.target.value)}
+										onValueChange={setIntervalMinutes}
 									>
-										<option value="1">1m buckets</option>
-										<option value="5">5m buckets</option>
-										<option value="15">15m buckets</option>
-									</select>
+										<SelectTrigger className="w-28">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="1">1m buckets</SelectItem>
+											<SelectItem value="5">5m buckets</SelectItem>
+											<SelectItem value="15">15m buckets</SelectItem>
+										</SelectContent>
+									</Select>
 									<Button
 										variant="outline"
 										size="sm"
@@ -1040,19 +1051,22 @@ export const ObservabilityPanel = ({
 							</div>
 							<div className="space-y-1.5">
 								<Label htmlFor="incident-redaction">Redaction Profile</Label>
-								<select
-									id="incident-redaction"
-									className="border-input dark:bg-input/30 h-8 w-full rounded-none border bg-transparent px-2.5 text-xs"
+								<Select
 									value={incidentRedactionProfile}
-									onChange={(event) =>
+									onValueChange={(value) =>
 										setIncidentRedactionProfile(
-											event.target.value as 'default' | 'strict',
+											value as 'default' | 'strict',
 										)
 									}
 								>
-									<option value="default">default</option>
-									<option value="strict">strict</option>
-								</select>
+									<SelectTrigger id="incident-redaction" className="w-full">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="default">default</SelectItem>
+										<SelectItem value="strict">strict</SelectItem>
+									</SelectContent>
+								</Select>
 							</div>
 							<div className="space-y-1.5">
 								<Label htmlFor="incident-destination">
