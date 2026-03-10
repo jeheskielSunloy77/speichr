@@ -105,7 +105,7 @@ export const WorkflowPanel = ({
 	const templatesQuery = useQuery({
 		queryKey: ['workflow-templates'],
 		queryFn: async () =>
-			unwrapResponse(await window.speichr.listWorkflowTemplates()),
+			unwrapResponse(await window.desktopApi.listWorkflowTemplates()),
 	})
 
 	const executionsQuery = useQuery({
@@ -113,7 +113,7 @@ export const WorkflowPanel = ({
 		enabled: isConnectionMode && Boolean(connectionId),
 		queryFn: async () =>
 			unwrapResponse(
-				await window.speichr.listWorkflowExecutions({
+				await window.desktopApi.listWorkflowExecutions({
 					connectionId: connectionId ?? '',
 					namespaceId: selectedNamespaceId ?? undefined,
 					limit: 50,
@@ -217,7 +217,7 @@ export const WorkflowPanel = ({
 				!isBuiltinTemplate(selectedTemplateId)
 			) {
 				return unwrapResponse(
-					await window.speichr.updateWorkflowTemplate({
+					await window.desktopApi.updateWorkflowTemplate({
 						id: selectedTemplateId,
 						template,
 					}),
@@ -225,7 +225,7 @@ export const WorkflowPanel = ({
 			}
 
 			return unwrapResponse(
-				await window.speichr.createWorkflowTemplate({
+				await window.desktopApi.createWorkflowTemplate({
 					template,
 				}),
 			)
@@ -249,7 +249,7 @@ export const WorkflowPanel = ({
 			}
 
 			return unwrapResponse(
-				await window.speichr.deleteWorkflowTemplate({
+				await window.desktopApi.deleteWorkflowTemplate({
 					id: selectedTemplateId,
 				}),
 			)
@@ -274,7 +274,7 @@ export const WorkflowPanel = ({
 			}
 
 			return unwrapResponse(
-				await window.speichr.previewWorkflow({
+				await window.desktopApi.previewWorkflow({
 					connectionId,
 					namespaceId: selectedNamespaceId ?? undefined,
 					...buildTemplateSource(),
@@ -299,7 +299,7 @@ export const WorkflowPanel = ({
 			}
 
 			return unwrapResponse(
-				await window.speichr.executeWorkflow({
+				await window.desktopApi.executeWorkflow({
 					connectionId,
 					namespaceId: selectedNamespaceId ?? undefined,
 					...buildTemplateSource(),
@@ -343,7 +343,7 @@ export const WorkflowPanel = ({
 	const rerunMutation = useMutation({
 		mutationFn: async (args: { executionId: string; withEdits: boolean }) => {
 			return unwrapResponse(
-				await window.speichr.rerunWorkflow({
+				await window.desktopApi.rerunWorkflow({
 					executionId: args.executionId,
 					parameterOverrides: args.withEdits ? parseParameters() : undefined,
 					guardrailConfirmed: prodGuardrailConfirmed,
@@ -369,7 +369,7 @@ export const WorkflowPanel = ({
 	const resumeMutation = useMutation({
 		mutationFn: async (executionId: string) =>
 			unwrapResponse(
-				await window.speichr.resumeWorkflow({
+				await window.desktopApi.resumeWorkflow({
 					executionId,
 					guardrailConfirmed: prodGuardrailConfirmed,
 				}),

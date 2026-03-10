@@ -57,7 +57,7 @@ import type {
 	WorkflowTemplateUpdateRequest,
 } from './cache'
 
-export interface SpeichrApi {
+export interface DesktopApi {
 	listConnections: () => Promise<
 		IpcResponseEnvelope<QueryResultMap['connection.list']>
 	>

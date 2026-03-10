@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-03-10
+
+### Changed
+
+- Rebranded the desktop app from `Speichr` to `Volatile` across package metadata, installer metadata, runtime titles, and project documentation.
+- Updated runtime identifiers to the new brand, including package name, executable name, bundle ID, database filename, keychain service name, temporary export filenames, and repository URLs.
+
+### Internal
+
+- Replaced brand-coupled code identifiers with descriptive names, including `OperationsService`, `DesktopApi`, `desktopApi`, and neutral IPC channel/type naming.
+- Renamed preload and application module filenames to remove the product name from source structure and test entrypoints.
+
 ## [1.2.0] - 2026-02-27
 
 ### Added

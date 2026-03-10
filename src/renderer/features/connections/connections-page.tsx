@@ -107,7 +107,7 @@ export const ConnectionsPage = () => {
 
 	const connectionsQuery = useQuery({
 		queryKey: ['connections'],
-		queryFn: async () => unwrapResponse(await window.speichr.listConnections()),
+		queryFn: async () => unwrapResponse(await window.desktopApi.listConnections()),
 	})
 
 	const connections = connectionsQuery.data ?? []
@@ -125,7 +125,7 @@ export const ConnectionsPage = () => {
 
 	const deleteConnectionMutation = useMutation({
 		mutationFn: async (connectionId: string) =>
-			unwrapResponse(await window.speichr.deleteConnection({ id: connectionId })),
+			unwrapResponse(await window.desktopApi.deleteConnection({ id: connectionId })),
 		onSuccess: async (_result, connectionId) => {
 			clearConnectionNamespaceSelection(connectionId)
 			if (selectedConnectionId === connectionId) {

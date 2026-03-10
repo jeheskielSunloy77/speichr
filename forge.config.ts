@@ -29,14 +29,14 @@ const config: ForgeConfig = {
 			return !shouldKeep
 		},
 		icon: 'assets/icon',
-		executableName: 'speichr',
-		appBundleId: 'com.speichr.app',
+		executableName: 'volatile',
+		appBundleId: 'com.volatile.app',
 		appCategoryType: 'public.app-category.developer-tools',
 		win32metadata: {
-			CompanyName: 'Speichr',
-			FileDescription: 'Speichr desktop application',
-			OriginalFilename: 'Speichr.exe',
-			ProductName: 'Speichr',
+			CompanyName: 'Volatile',
+			FileDescription: 'Volatile desktop application',
+			OriginalFilename: 'Volatile.exe',
+			ProductName: 'Volatile',
 		},
 	},
 	rebuildConfig: {},
@@ -47,13 +47,13 @@ const config: ForgeConfig = {
 			{
 				options: {
 					maintainer: 'jeheskielSunloy77 <jeheskielventiokysunloy@gmail.com>',
-					homepage: 'https://github.com/jeheskielSunloy77/speichr',
+					homepage: 'https://github.com/jeheskielSunloy77/volatile',
 					icon: 'assets/icon.png',
 					categories: ['Development', 'Utility'],
 					synopsis:
 						'Desktop operations studio for cache workflows and observability',
 					description:
-						'Speichr is an Electron desktop app for managing cache connections, key workflows, observability, and incident exports.',
+						'Volatile is an Electron desktop app for managing cache connections, key workflows, observability, and incident exports.',
 				},
 			},
 			['linux'],

@@ -5,7 +5,7 @@ import type { ConnectionSecret } from '../../../shared/contracts/cache'
 import type { SecretStore } from '../../application/ports'
 import { OperationFailure } from '../../domain/operation-failure'
 
-const SERVICE_NAME = 'speichr'
+const SERVICE_NAME = 'volatile'
 const nodeRequire = createRequire(__filename)
 type KeytarModule = {
 	deletePassword: (service: string, account: string) => Promise<boolean>

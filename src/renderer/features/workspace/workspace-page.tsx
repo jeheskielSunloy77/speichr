@@ -236,7 +236,7 @@ export const WorkspacePage = () => {
 
 	const connectionsQuery = useQuery({
 		queryKey: ['connections'],
-		queryFn: async () => unwrapResponse(await window.speichr.listConnections()),
+		queryFn: async () => unwrapResponse(await window.desktopApi.listConnections()),
 	})
 
 	const connections = connectionsQuery.data ?? []
@@ -282,7 +282,7 @@ export const WorkspacePage = () => {
 			}
 
 			return unwrapResponse(
-				await window.speichr.listNamespaces({
+				await window.desktopApi.listNamespaces({
 					connectionId: selectedConnectionId,
 				}),
 			)
@@ -330,7 +330,7 @@ export const WorkspacePage = () => {
 			}
 
 			return unwrapResponse(
-				await window.speichr.getCapabilities({
+				await window.desktopApi.getCapabilities({
 					connectionId: selectedConnectionId,
 				}),
 			)
@@ -356,7 +356,7 @@ export const WorkspacePage = () => {
 
 			if (trimmedSearchPattern.length > 0) {
 				return unwrapResponse(
-					await window.speichr.searchKeys({
+					await window.desktopApi.searchKeys({
 						connectionId: selectedConnectionId,
 						namespaceId: selectedNamespaceId ?? undefined,
 						pattern: trimmedSearchPattern,
@@ -367,7 +367,7 @@ export const WorkspacePage = () => {
 			}
 
 			return unwrapResponse(
-				await window.speichr.listKeys({
+				await window.desktopApi.listKeys({
 					connectionId: selectedConnectionId,
 					namespaceId: selectedNamespaceId ?? undefined,
 					cursor,
@@ -393,7 +393,7 @@ export const WorkspacePage = () => {
 			}
 
 			return unwrapResponse(
-				await window.speichr.countKeys({
+				await window.desktopApi.countKeys({
 					connectionId: selectedConnectionId,
 					namespaceId: selectedNamespaceId ?? undefined,
 					pattern: trimmedSearchPattern || undefined,
@@ -413,7 +413,7 @@ export const WorkspacePage = () => {
 			}
 
 			return unwrapResponse(
-				await window.speichr.getKey({
+				await window.desktopApi.getKey({
 					connectionId: selectedConnectionId,
 					namespaceId: selectedNamespaceId ?? undefined,
 					key: selectedKey,
@@ -466,7 +466,7 @@ export const WorkspacePage = () => {
 			}
 
 			return unwrapResponse(
-				await window.speichr.listSnapshots({
+				await window.desktopApi.listSnapshots({
 					connectionId: selectedConnectionId,
 					namespaceId: selectedNamespaceId ?? undefined,
 					key: selectedKey,
@@ -548,7 +548,7 @@ export const WorkspacePage = () => {
 					: undefined
 
 			return unwrapResponse(
-				await window.speichr.setKey({
+				await window.desktopApi.setKey({
 					connectionId: selectedConnectionId,
 					namespaceId: selectedNamespaceId ?? undefined,
 					key: normalizedKey,
@@ -593,7 +593,7 @@ export const WorkspacePage = () => {
 			}
 
 			return unwrapResponse(
-				await window.speichr.deleteKey({
+				await window.desktopApi.deleteKey({
 					connectionId: selectedConnectionId,
 					namespaceId: selectedNamespaceId ?? undefined,
 					key: args.key,
@@ -633,7 +633,7 @@ export const WorkspacePage = () => {
 			}
 
 			return unwrapResponse(
-				await window.speichr.restoreSnapshot({
+				await window.desktopApi.restoreSnapshot({
 					connectionId: selectedConnectionId,
 					namespaceId: selectedNamespaceId ?? undefined,
 					key: selectedKey,

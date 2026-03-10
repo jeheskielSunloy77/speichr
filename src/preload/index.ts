@@ -1,5 +1,5 @@
 import { contextBridge } from 'electron'
 
-import { speichrApi } from './bridge/speichr-api'
+import { desktopApi } from './bridge/desktop-api'
 
-contextBridge.exposeInMainWorld('speichr', speichrApi)
+contextBridge.exposeInMainWorld('desktopApi', desktopApi)

@@ -5,7 +5,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { CacheGateway } from '../main/application/ports'
-import { SpeichrService } from '../main/application/speichr-service'
+import { OperationsService } from '../main/application/operations-service'
 import { InMemorySecretStore } from '../main/infrastructure/secrets/in-memory-secret-store'
 import {
 	createSqliteDatabase,
@@ -207,7 +207,7 @@ afterEach(() => {
 
 describe('workflow preview pagination integration', () => {
 	it('returns next cursor and supports paging across preview requests', async () => {
-		const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'speichr-intg-'))
+		const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'volatile-intg-'))
 		const dbPath = path.join(tempDirectory, 'integration.db')
 		const db = createSqliteDatabase(dbPath)
 		contexts.push({
@@ -226,7 +226,7 @@ describe('workflow preview pagination integration', () => {
 		const observabilityRepository = new SqliteObservabilityRepository(db)
 		const alertRepository = new SqliteAlertRepository(db)
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			connectionRepository,
 			new InMemorySecretStore(),
 			memcachedKeyIndexRepository,

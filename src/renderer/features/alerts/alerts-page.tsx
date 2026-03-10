@@ -10,7 +10,7 @@ export const AlertsPage = () => {
 
 	const connectionsQuery = useQuery({
 		queryKey: ['connections'],
-		queryFn: async () => unwrapResponse(await window.speichr.listConnections()),
+		queryFn: async () => unwrapResponse(await window.desktopApi.listConnections()),
 	})
 
 	const selectedConnection = React.useMemo(

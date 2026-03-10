@@ -106,7 +106,7 @@ const createLegacySchema = (dbPath: string): void => {
 }
 
 const tempDirectory = fs.mkdtempSync(
-	path.join(os.tmpdir(), 'speichr-migration-check-'),
+	path.join(os.tmpdir(), 'volatile-migration-check-'),
 )
 
 try {

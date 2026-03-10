@@ -121,7 +121,7 @@ export const AlertsPanel = ({ connection }: AlertsPanelProps) => {
 		queryKey: ['alerts', unreadOnly],
 		queryFn: async () =>
 			unwrapResponse(
-				await window.speichr.listAlerts({
+				await window.desktopApi.listAlerts({
 					unreadOnly,
 					limit: 100,
 				}),
@@ -130,13 +130,13 @@ export const AlertsPanel = ({ connection }: AlertsPanelProps) => {
 
 	const rulesQuery = useQuery({
 		queryKey: ['alert-rules'],
-		queryFn: async () => unwrapResponse(await window.speichr.listAlertRules()),
+		queryFn: async () => unwrapResponse(await window.desktopApi.listAlertRules()),
 	})
 
 	const markReadMutation = useMutation({
 		mutationFn: async (id: string) =>
 			unwrapResponse(
-				await window.speichr.markAlertRead({
+				await window.desktopApi.markAlertRead({
 					id,
 				}),
 			),
@@ -156,7 +156,7 @@ export const AlertsPanel = ({ connection }: AlertsPanelProps) => {
 
 			if (editingRuleId) {
 				return unwrapResponse(
-					await window.speichr.updateAlertRule({
+					await window.desktopApi.updateAlertRule({
 						id: editingRuleId,
 						rule,
 					}),
@@ -164,7 +164,7 @@ export const AlertsPanel = ({ connection }: AlertsPanelProps) => {
 			}
 
 			return unwrapResponse(
-				await window.speichr.createAlertRule({
+				await window.desktopApi.createAlertRule({
 					rule,
 				}),
 			)
@@ -185,7 +185,7 @@ export const AlertsPanel = ({ connection }: AlertsPanelProps) => {
 	const deleteRuleMutation = useMutation({
 		mutationFn: async (id: string) =>
 			unwrapResponse(
-				await window.speichr.deleteAlertRule({
+				await window.desktopApi.deleteAlertRule({
 					id,
 				}),
 			),

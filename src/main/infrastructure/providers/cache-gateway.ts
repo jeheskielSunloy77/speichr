@@ -320,7 +320,7 @@ export class DefaultCacheGateway implements CacheGateway {
 		const startedAt = Date.now()
 
 		try {
-			await client.get('__speichr_healthcheck__')
+			await client.get('__volatile_healthcheck__')
 
 			return {
 				latencyMs: Date.now() - startedAt,

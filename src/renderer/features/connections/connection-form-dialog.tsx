@@ -148,7 +148,7 @@ export const ConnectionFormDialog = ({
 		}
 
 		setIsLoadingNamespaces(true)
-		void window.speichr
+		void window.desktopApi
 			.listNamespaces({ connectionId: initialProfile.id })
 			.then((response) => unwrapResponse(response))
 			.then((namespaces) => {
@@ -263,7 +263,7 @@ export const ConnectionFormDialog = ({
 		engine: ConnectionProfile['engine'],
 	): Promise<void> => {
 		for (const namespaceId of deletedNamespaceIds) {
-			unwrapResponse(await window.speichr.deleteNamespace({ id: namespaceId }))
+			unwrapResponse(await window.desktopApi.deleteNamespace({ id: namespaceId }))
 		}
 
 		for (const row of namespaceRows) {
@@ -275,7 +275,7 @@ export const ConnectionFormDialog = ({
 			if (row.id) {
 				if (normalizedName !== (row.originalName ?? '').trim()) {
 					unwrapResponse(
-						await window.speichr.updateNamespace({
+						await window.desktopApi.updateNamespace({
 							id: row.id,
 							name: normalizedName,
 						}),
@@ -285,7 +285,7 @@ export const ConnectionFormDialog = ({
 			}
 
 			unwrapResponse(
-				await window.speichr.createNamespace({
+				await window.desktopApi.createNamespace({
 					namespace: {
 						connectionId,
 						name: normalizedName,
@@ -308,7 +308,7 @@ export const ConnectionFormDialog = ({
 		setIsTesting(true)
 		try {
 			const result = unwrapResponse(
-				await window.speichr.testConnection({
+				await window.desktopApi.testConnection({
 					connectionId:
 						mode === 'edit' && initialProfile ? initialProfile.id : undefined,
 					profile: draft,
@@ -337,7 +337,7 @@ export const ConnectionFormDialog = ({
 		try {
 			if (mode === 'create') {
 				const profile = unwrapResponse(
-					await window.speichr.createConnection({
+					await window.desktopApi.createConnection({
 						profile: draft,
 						secret,
 					}),
@@ -350,7 +350,7 @@ export const ConnectionFormDialog = ({
 				const includeSecret = Boolean(secret.username || secret.password)
 
 				const profile = unwrapResponse(
-					await window.speichr.updateConnection({
+					await window.desktopApi.updateConnection({
 						id: initialProfile.id,
 						profile: draft,
 						secret: includeSecret ? secret : undefined,

@@ -14,7 +14,7 @@ import type {
 } from '../../shared/contracts/cache'
 
 import { OperationFailure } from '../domain/operation-failure'
-import { SpeichrService } from './speichr-service'
+import { OperationsService } from './operations-service'
 import type {
 	CacheGateway,
 	ConnectionRepository,
@@ -199,14 +199,14 @@ const createStoredProfile = (): ConnectionProfile => ({
 	updatedAt: new Date().toISOString(),
 })
 
-describe('SpeichrService', () => {
+describe('OperationsService', () => {
 	it('creates and stores connection profiles with keychain references', async () => {
 		const repository = new InMemoryConnectionRepository()
 		const secretStore = new InMemorySecretStore()
 		const memcachedIndex = new InMemoryMemcachedIndexRepository()
 		const gateway = createGatewayMock()
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -255,7 +255,7 @@ describe('SpeichrService', () => {
 		await repository.save(profile)
 		await secretStore.saveSecret(profile.id, { password: 'secret' })
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -285,7 +285,7 @@ describe('SpeichrService', () => {
 			deleteSecret: vi.fn(async () => undefined),
 		}
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -319,7 +319,7 @@ describe('SpeichrService', () => {
 			password: 'stored-pass',
 		})
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -356,7 +356,7 @@ describe('SpeichrService', () => {
 			token: 'stored-token',
 		})
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -398,7 +398,7 @@ describe('SpeichrService', () => {
 		await repository.save(profile)
 		await secretStore.saveSecret(profile.id, { password: 'secret' })
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -436,7 +436,7 @@ describe('SpeichrService', () => {
 		await repository.save(profile)
 		await secretStore.saveSecret(profile.id, { password: 'secret' })
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -492,7 +492,7 @@ describe('SpeichrService', () => {
 		await repository.save(profile)
 		await secretStore.saveSecret(profile.id, { password: 'secret' })
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -540,7 +540,7 @@ describe('SpeichrService', () => {
 		await repository.save(profile)
 		await secretStore.saveSecret(profile.id, { password: 'secret' })
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -607,7 +607,7 @@ describe('SpeichrService', () => {
 		await repository.save(profile)
 		await secretStore.saveSecret(profile.id, { password: 'secret' })
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -668,7 +668,7 @@ describe('SpeichrService', () => {
 		await repository.save(profile)
 		await secretStore.saveSecret(profile.id, { password: 'secret' })
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -724,7 +724,7 @@ describe('SpeichrService', () => {
 		await repository.save(profile)
 		await secretStore.saveSecret(profile.id, { password: 'secret' })
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -775,7 +775,7 @@ describe('SpeichrService', () => {
 		await repository.save(profile)
 		await secretStore.saveSecret(profile.id, { password: 'secret' })
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -811,7 +811,7 @@ describe('SpeichrService', () => {
 		await repository.save(profile)
 		await secretStore.saveSecret(profile.id, { password: 'secret' })
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -876,7 +876,7 @@ describe('SpeichrService', () => {
 		await repository.save(profile)
 		await secretStore.saveSecret(profile.id, { password: 'secret' })
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -947,7 +947,7 @@ describe('SpeichrService', () => {
 		await repository.save(profile)
 		await secretStore.saveSecret(profile.id, { password: 'secret' })
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -998,7 +998,7 @@ describe('SpeichrService', () => {
 			stop: stopMock,
 		}
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -1047,7 +1047,7 @@ describe('SpeichrService', () => {
 		await repository.save(profile)
 		await secretStore.saveSecret(profile.id, { password: 'secret' })
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -1121,7 +1121,7 @@ describe('SpeichrService', () => {
 		await repository.save(profile)
 		await secretStore.saveSecret(profile.id, { password: 'secret' })
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -1159,7 +1159,7 @@ describe('SpeichrService', () => {
 		expect(preview.manifest.timelineEventIds.length).toBe(preview.timelineCount)
 
 		const tempDirectory = fs.mkdtempSync(
-			path.join(os.tmpdir(), 'speichr-incident-'),
+			path.join(os.tmpdir(), 'volatile-incident-'),
 		)
 		const destinationPath = path.join(tempDirectory, 'bundle.json')
 
@@ -1262,7 +1262,7 @@ describe('SpeichrService', () => {
 		await repository.save(profile)
 		await secretStore.saveSecret(profile.id, { password: 'secret' })
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,
@@ -1494,7 +1494,7 @@ describe('SpeichrService', () => {
 			getStorageSummary: vi.fn(async () => summary),
 		}
 
-		const service = new SpeichrService(
+		const service = new OperationsService(
 			repository,
 			secretStore,
 			memcachedIndex,

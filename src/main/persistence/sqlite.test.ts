@@ -42,7 +42,7 @@ const testContexts: TestContext[] = []
 
 const SQLITE_RUNTIME_AVAILABLE = (() => {
 	const tempDirectory = fs.mkdtempSync(
-		path.join(os.tmpdir(), 'speichr-sqlite-check-'),
+		path.join(os.tmpdir(), 'volatile-sqlite-check-'),
 	)
 	const dbPath = path.join(tempDirectory, 'runtime-check.db')
 
@@ -59,8 +59,8 @@ const SQLITE_RUNTIME_AVAILABLE = (() => {
 })()
 
 const createTestDatabase = () => {
-	const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'speichr-sqlite-'))
-	const dbPath = path.join(tempDirectory, 'speichr-test.db')
+	const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'volatile-sqlite-'))
+	const dbPath = path.join(tempDirectory, 'volatile-test.db')
 	const db = createSqliteDatabase(dbPath)
 
 	testContexts.push({

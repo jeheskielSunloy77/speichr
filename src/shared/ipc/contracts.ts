@@ -83,10 +83,10 @@ import type {
 	WorkflowTemplateUpdateRequest,
 } from '../contracts/cache'
 
-export const IPC_COMMAND_CHANNEL = 'speichr:command'
-export const IPC_QUERY_CHANNEL = 'speichr:query'
+export const APP_COMMAND_CHANNEL = 'app:command'
+export const APP_QUERY_CHANNEL = 'app:query'
 
-export type SpeichrCommand =
+export type AppCommand =
 	| 'connection.create'
 	| 'connection.update'
 	| 'connection.delete'
@@ -119,7 +119,7 @@ export type SpeichrCommand =
 	| 'incident.bundle.export.resume'
 	| 'incident.bundle.export'
 
-export type SpeichrQuery =
+export type AppQuery =
 	| 'connection.list'
 	| 'connection.get'
 	| 'namespace.list'
@@ -288,7 +288,7 @@ export interface OperationError {
 
 export interface IpcCommandEnvelope<
 	TPayload,
-	TCommand extends SpeichrCommand = SpeichrCommand,
+	TCommand extends AppCommand = AppCommand,
 > {
 	command: TCommand
 	payload: TPayload
@@ -297,7 +297,7 @@ export interface IpcCommandEnvelope<
 
 export interface IpcQueryEnvelope<
 	TPayload,
-	TQuery extends SpeichrQuery = SpeichrQuery,
+	TQuery extends AppQuery = AppQuery,
 > {
 	query: TQuery
 	payload: TPayload

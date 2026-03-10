@@ -622,7 +622,7 @@ class NoopEngineEventIngestor implements EngineEventIngestor {
 	}
 }
 
-export class SpeichrService {
+export class OperationsService {
 	private readonly snapshotRepository: SnapshotRepository
 
 	private readonly workflowTemplateRepository: WorkflowTemplateRepository
@@ -2163,7 +2163,7 @@ export class SpeichrService {
 		const now = new Date().toISOString()
 		const destinationPath =
 			payload.destinationPath?.trim() ||
-			path.join(os.tmpdir(), `speichr-incident-${id}.json`)
+			path.join(os.tmpdir(), `volatile-incident-${id}.json`)
 
 		const jobState: IncidentExportJobState = {
 			job: {
@@ -2855,7 +2855,7 @@ export class SpeichrService {
 
 		const artifactPath =
 			payload.destinationPath?.trim() ||
-			path.join(os.tmpdir(), `speichr-incident-${id}.json`)
+			path.join(os.tmpdir(), `volatile-incident-${id}.json`)
 
 		const artifactPayload = this.buildIncidentBundleArtifactPayload({
 			payload,
@@ -4079,7 +4079,7 @@ export class SpeichrService {
 	}
 }
 
-// Backward-compat alias removed; use `SpeichrService` instead.
+// Backward-compat alias removed; use `OperationsService` instead.
 
 const buildCompareMetric = (args: {
 	metric: CompareMetricDelta['metric']

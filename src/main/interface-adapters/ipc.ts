@@ -8,23 +8,23 @@ import type {
 	OperationError,
 } from '../../shared/ipc/contracts'
 import {
-	IPC_COMMAND_CHANNEL,
-	IPC_QUERY_CHANNEL,
+	APP_COMMAND_CHANNEL,
+	APP_QUERY_CHANNEL,
 } from '../../shared/ipc/contracts'
 import {
 	commandEnvelopeSchema,
 	queryEnvelopeSchema,
 } from '../../shared/schemas/ipc'
 
-import type { SpeichrService } from '../application/speichr-service'
+import type { OperationsService } from '../application/operations-service'
 import { OperationFailure } from '../domain/operation-failure'
 
-export const registerIpcHandlers = (service: SpeichrService): void => {
-	ipcMain.removeHandler(IPC_COMMAND_CHANNEL)
-	ipcMain.removeHandler(IPC_QUERY_CHANNEL)
+export const registerIpcHandlers = (service: OperationsService): void => {
+	ipcMain.removeHandler(APP_COMMAND_CHANNEL)
+	ipcMain.removeHandler(APP_QUERY_CHANNEL)
 
 	ipcMain.handle(
-		IPC_COMMAND_CHANNEL,
+		APP_COMMAND_CHANNEL,
 		async (_event, rawEnvelope): Promise<IpcResponseEnvelope<unknown>> => {
 			try {
 				const envelope = commandEnvelopeSchema.parse(rawEnvelope)
@@ -42,7 +42,7 @@ export const registerIpcHandlers = (service: SpeichrService): void => {
 	)
 
 	ipcMain.handle(
-		IPC_QUERY_CHANNEL,
+		APP_QUERY_CHANNEL,
 		async (_event, rawEnvelope): Promise<IpcResponseEnvelope<unknown>> => {
 			try {
 				const envelope = queryEnvelopeSchema.parse(rawEnvelope)
@@ -61,7 +61,7 @@ export const registerIpcHandlers = (service: SpeichrService): void => {
 }
 
 const handleCommand = async (
-	service: SpeichrService,
+	service: OperationsService,
 	envelope: AnyCommandEnvelope,
 ): Promise<unknown> => {
 	switch (envelope.command) {
@@ -133,7 +133,7 @@ const handleCommand = async (
 }
 
 const handleQuery = async (
-	service: SpeichrService,
+	service: OperationsService,
 	envelope: AnyQueryEnvelope,
 ): Promise<unknown> => {
 	switch (envelope.query) {

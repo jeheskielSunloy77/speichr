@@ -51,7 +51,7 @@ export const AlertsNavbarPopover = () => {
 	const unreadCountQuery = useQuery({
 		queryKey: ['alerts', 'unread-count'],
 		queryFn: async () =>
-			unwrapResponse(await window.speichr.getUnreadAlertCount()),
+			unwrapResponse(await window.desktopApi.getUnreadAlertCount()),
 		refetchInterval: ALERTS_POLL_MS,
 	})
 
@@ -59,7 +59,7 @@ export const AlertsNavbarPopover = () => {
 		queryKey: ['alerts', 'navbar-unread'],
 		queryFn: async () =>
 			unwrapResponse(
-				await window.speichr.listAlerts({
+				await window.desktopApi.listAlerts({
 					unreadOnly: true,
 					limit: ALERTS_POPOVER_LIMIT,
 				}),
@@ -71,7 +71,7 @@ export const AlertsNavbarPopover = () => {
 	const markReadMutation = useMutation({
 		mutationFn: async (id: string) =>
 			unwrapResponse(
-				await window.speichr.markAlertRead({
+				await window.desktopApi.markAlertRead({
 					id,
 				}),
 			),
@@ -87,7 +87,7 @@ export const AlertsNavbarPopover = () => {
 
 	const markAllReadMutation = useMutation({
 		mutationFn: async () =>
-			unwrapResponse(await window.speichr.markAllAlertsRead()),
+			unwrapResponse(await window.desktopApi.markAllAlertsRead()),
 		onSuccess: async () => {
 			toast.success('All unread alerts marked as read.')
 			await queryClient.invalidateQueries({ queryKey: ['alerts'] })

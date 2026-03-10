@@ -1,6 +1,6 @@
-# Speichr
+# Volatile
 
-Speichr is an Electron desktop app for managing cache connections, workflow automation, observability, governance controls, and incident export workflows.
+Volatile is an Electron desktop app for managing cache connections, workflow automation, observability, governance controls, and incident export workflows.
 
 ## Supported Release Artifacts
 
@@ -20,7 +20,7 @@ All release assets are built in GitHub Actions and attached to GitHub releases.
 ### macOS
 
 1. Download the macOS ZIP from the GitHub Release assets.
-2. Extract and move `Speichr.app` into `Applications`.
+2. Extract and move `Volatile.app` into `Applications`.
 3. Open the app (Gatekeeper prompts may appear for unsigned builds).
 
 ### Linux (Debian/Ubuntu)
@@ -29,7 +29,7 @@ All release assets are built in GitHub Actions and attached to GitHub releases.
 2. Install:
 
 ```bash
-sudo dpkg -i speichr_*_amd64.deb
+sudo dpkg -i volatile_*_amd64.deb
 sudo apt-get install -f
 ```
 

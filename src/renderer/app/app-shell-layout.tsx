@@ -100,7 +100,7 @@ const getPageTitle = (pathname: string): string => {
 		return 'Workspace'
 	}
 
-	return 'Speichr'
+	return 'Volatile'
 }
 
 const isActivePath = (currentPath: string, targetPath: string): boolean => {
@@ -155,7 +155,7 @@ export const AppShellLayout = () => {
 
 	const connectionsQuery = useQuery({
 		queryKey: ['connections'],
-		queryFn: async () => unwrapResponse(await window.speichr.listConnections()),
+		queryFn: async () => unwrapResponse(await window.desktopApi.listConnections()),
 	})
 
 	const connections = connectionsQuery.data ?? []
@@ -188,7 +188,7 @@ export const AppShellLayout = () => {
 		enabled: Boolean(selectedConnectionId),
 		queryFn: async () =>
 			unwrapResponse(
-				await window.speichr.listNamespaces({
+				await window.desktopApi.listNamespaces({
 					connectionId: selectedConnectionId ?? '',
 				}),
 			),
@@ -204,7 +204,7 @@ export const AppShellLayout = () => {
 			const entries = await Promise.all(
 				connections.map(async (connection) => {
 					const namespaces = unwrapResponse(
-						await window.speichr.listNamespaces({
+						await window.desktopApi.listNamespaces({
 							connectionId: connection.id,
 						}),
 					)

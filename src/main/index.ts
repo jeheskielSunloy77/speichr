@@ -4,7 +4,7 @@ import type BetterSqlite3 from 'better-sqlite3'
 import { app, BrowserWindow } from 'electron'
 import started from 'electron-squirrel-startup'
 
-import { SpeichrService } from './application/speichr-service'
+import { OperationsService } from './application/operations-service'
 import { DefaultCacheGateway } from './infrastructure/providers/cache-gateway'
 import { ProviderEngineEventIngestor } from './infrastructure/providers/provider-engine-event-ingestor'
 import { InMemorySecretStore } from './infrastructure/secrets/in-memory-secret-store'
@@ -34,7 +34,7 @@ if (started) {
 
 type RuntimeContext = {
 	db: BetterSqlite3.Database
-	service: SpeichrService
+	service: OperationsService
 }
 
 let runtime: RuntimeContext | null = null
@@ -46,7 +46,7 @@ const initializeRuntime = (): RuntimeContext => {
 
 	const userDataPath = app.getPath('userData')
 
-	const databasePath = path.join(userDataPath, 'speichr.db')
+	const databasePath = path.join(userDataPath, 'volatile.db')
 	const db = createSqliteDatabase(databasePath)
 
 	const connectionRepository = new SqliteConnectionRepository(db)
@@ -85,7 +85,7 @@ const initializeRuntime = (): RuntimeContext => {
 		cacheGateway,
 	)
 
-	const service = new SpeichrService(
+	const service = new OperationsService(
 		connectionRepository,
 		secretStore,
 		memcachedKeyIndexRepository,
@@ -123,7 +123,7 @@ const createMainWindow = (): BrowserWindow => {
 		height: 860,
 		minWidth: 1120,
 		minHeight: 700,
-		title: 'Speichr',
+		title: 'Volatile',
 		webPreferences: {
 			preload: path.join(__dirname, 'preload.js'),
 			contextIsolation: true,

@@ -182,7 +182,7 @@ export const ObservabilityPanel = ({
 		enabled: showConnectionSections,
 		queryFn: async () =>
 			unwrapResponse(
-				await window.speichr.getObservabilityDashboard({
+				await window.desktopApi.getObservabilityDashboard({
 					connectionId: connection.id,
 					namespaceId: selectedNamespaceId ?? undefined,
 					intervalMinutes: Math.max(1, Number(intervalMinutes) || 5),
@@ -203,7 +203,7 @@ export const ObservabilityPanel = ({
 		enabled: showConnectionSections,
 		queryFn: async () =>
 			unwrapResponse(
-				await window.speichr.getKeyspaceActivity({
+				await window.desktopApi.getKeyspaceActivity({
 					connectionId: connection.id,
 					namespaceId: selectedNamespaceId ?? undefined,
 					from: toIsoOrFallback(
@@ -229,7 +229,7 @@ export const ObservabilityPanel = ({
 		enabled: showConnectionSections,
 		queryFn: async () =>
 			unwrapResponse(
-				await window.speichr.getFailedOperationDrilldown({
+				await window.desktopApi.getFailedOperationDrilldown({
 					connectionId: connection.id,
 					namespaceId: selectedNamespaceId ?? undefined,
 					from: toIsoOrFallback(failedFrom, new Date(Date.now() - ONE_HOUR_MS)),
@@ -252,7 +252,7 @@ export const ObservabilityPanel = ({
 		enabled: showConnectionSections,
 		queryFn: async () =>
 			unwrapResponse(
-				await window.speichr.comparePeriods({
+				await window.desktopApi.comparePeriods({
 					connectionId: connection.id,
 					namespaceId: selectedNamespaceId ?? undefined,
 					baselineFrom: toIsoOrFallback(
@@ -277,7 +277,7 @@ export const ObservabilityPanel = ({
 		enabled: showIncidentSection,
 		queryFn: async () =>
 			unwrapResponse(
-				await window.speichr.listIncidentBundles({
+				await window.desktopApi.listIncidentBundles({
 					limit: 20,
 				}),
 			),
@@ -287,7 +287,7 @@ export const ObservabilityPanel = ({
 		queryKey: ['incident-export-job', incidentExportJobId],
 		queryFn: async () =>
 			unwrapResponse(
-				await window.speichr.getIncidentBundleExportJob({
+				await window.desktopApi.getIncidentBundleExportJob({
 					jobId: incidentExportJobId ?? '',
 				}),
 			),
@@ -331,7 +331,7 @@ export const ObservabilityPanel = ({
 	const incidentPreviewMutation = useMutation({
 		mutationFn: async () =>
 			unwrapResponse(
-				await window.speichr.previewIncidentBundle(buildIncidentRequest()),
+				await window.desktopApi.previewIncidentBundle(buildIncidentRequest()),
 			),
 		onSuccess: (preview) => {
 			setIncidentPreview({
@@ -358,7 +358,7 @@ export const ObservabilityPanel = ({
 	const incidentExportMutation = useMutation({
 		mutationFn: async () =>
 			unwrapResponse(
-				await window.speichr.startIncidentBundleExport({
+				await window.desktopApi.startIncidentBundleExport({
 					...buildIncidentRequest(),
 					destinationPath:
 						incidentDestinationPath.trim().length > 0
@@ -386,7 +386,7 @@ export const ObservabilityPanel = ({
 			}
 
 			return unwrapResponse(
-				await window.speichr.cancelIncidentBundleExportJob({
+				await window.desktopApi.cancelIncidentBundleExportJob({
 					jobId: incidentExportJobId,
 				}),
 			)
@@ -410,7 +410,7 @@ export const ObservabilityPanel = ({
 			}
 
 			return unwrapResponse(
-				await window.speichr.resumeIncidentBundleExportJob({
+				await window.desktopApi.resumeIncidentBundleExportJob({
 					jobId: incidentExportJobId,
 				}),
 			)
@@ -1064,7 +1064,7 @@ export const ObservabilityPanel = ({
 									onChange={(event) =>
 										setIncidentDestinationPath(event.target.value)
 									}
-									placeholder="/tmp/speichr-incident.json"
+									placeholder="/tmp/volatile-incident.json"
 								/>
 							</div>
 						</div>

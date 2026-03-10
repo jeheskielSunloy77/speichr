@@ -1,6 +1,6 @@
 import { ipcRenderer } from 'electron'
 
-import type { SpeichrApi } from '../../shared/contracts/api'
+import type { DesktopApi } from '../../shared/contracts/api'
 import type {
 	CommandPayloadMap,
 	CommandResultMap,
@@ -9,8 +9,8 @@ import type {
 	QueryResultMap,
 } from '../../shared/ipc/contracts'
 import {
-	IPC_COMMAND_CHANNEL,
-	IPC_QUERY_CHANNEL,
+	APP_COMMAND_CHANNEL,
+	APP_QUERY_CHANNEL,
 } from '../../shared/ipc/contracts'
 import { commandEnvelopeSchema, queryEnvelopeSchema } from '../schemas/ipc'
 
@@ -32,7 +32,7 @@ const invokeCommand = async <TCommand extends keyof CommandPayloadMap>(
 		correlationId: createCorrelationId(),
 	})
 
-	return ipcRenderer.invoke(IPC_COMMAND_CHANNEL, envelope)
+	return ipcRenderer.invoke(APP_COMMAND_CHANNEL, envelope)
 }
 
 const invokeQuery = async <TQuery extends keyof QueryPayloadMap>(
@@ -45,10 +45,10 @@ const invokeQuery = async <TQuery extends keyof QueryPayloadMap>(
 		correlationId: createCorrelationId(),
 	})
 
-	return ipcRenderer.invoke(IPC_QUERY_CHANNEL, envelope)
+	return ipcRenderer.invoke(APP_QUERY_CHANNEL, envelope)
 }
 
-export const speichrApi: SpeichrApi = {
+export const desktopApi: DesktopApi = {
 	listConnections: () => invokeQuery('connection.list', {}),
 	getConnection: (payload) => invokeQuery('connection.get', payload),
 	listNamespaces: (payload) => invokeQuery('namespace.list', payload),

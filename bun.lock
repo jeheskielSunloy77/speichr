@@ -1,8 +1,9 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "speichr",
+      "name": "volatile",
       "dependencies": {
         "@base-ui/react": "^1.2.0",
         "@fontsource-variable/jetbrains-mono": "^5.2.8",

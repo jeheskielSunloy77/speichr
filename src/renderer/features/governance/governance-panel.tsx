@@ -277,7 +277,7 @@ export const GovernancePanel = ({
 
 	const policyPacksQuery = useQuery({
 		queryKey: ['policy-packs'],
-		queryFn: async () => unwrapResponse(await window.speichr.listPolicyPacks()),
+		queryFn: async () => unwrapResponse(await window.desktopApi.listPolicyPacks()),
 	})
 
 	const assignmentsQuery = useQuery({
@@ -285,7 +285,7 @@ export const GovernancePanel = ({
 		enabled: isConnectionMode && Boolean(connectionId),
 		queryFn: async () =>
 			unwrapResponse(
-				await window.speichr.listPolicyPackAssignments({
+				await window.desktopApi.listPolicyPackAssignments({
 					connectionId: connectionId ?? '',
 				}),
 			),
@@ -295,13 +295,13 @@ export const GovernancePanel = ({
 		queryKey: ['retention-policies'],
 		enabled: isAdminMode,
 		queryFn: async () =>
-			unwrapResponse(await window.speichr.listRetentionPolicies()),
+			unwrapResponse(await window.desktopApi.listRetentionPolicies()),
 	})
 
 	const storageSummaryQuery = useQuery({
 		queryKey: ['storage-summary'],
 		enabled: isAdminMode,
-		queryFn: async () => unwrapResponse(await window.speichr.getStorageSummary()),
+		queryFn: async () => unwrapResponse(await window.desktopApi.getStorageSummary()),
 	})
 
 	React.useEffect(() => {
@@ -333,7 +333,7 @@ export const GovernancePanel = ({
 
 			if (editingPolicyPackId) {
 				return unwrapResponse(
-					await window.speichr.updatePolicyPack({
+					await window.desktopApi.updatePolicyPack({
 						id: editingPolicyPackId,
 						policyPack,
 					}),
@@ -341,7 +341,7 @@ export const GovernancePanel = ({
 			}
 
 			return unwrapResponse(
-				await window.speichr.createPolicyPack({
+				await window.desktopApi.createPolicyPack({
 					policyPack,
 				}),
 			)
@@ -361,7 +361,7 @@ export const GovernancePanel = ({
 
 	const deletePolicyPackMutation = useMutation({
 		mutationFn: async (id: string) =>
-			unwrapResponse(await window.speichr.deletePolicyPack({ id })),
+			unwrapResponse(await window.desktopApi.deletePolicyPack({ id })),
 			onSuccess: async () => {
 				setEditingPolicyPackId(null)
 				setPolicyPackForm(defaultPolicyPackFormState)
@@ -387,7 +387,7 @@ export const GovernancePanel = ({
 			}
 
 			return unwrapResponse(
-				await window.speichr.assignPolicyPack({
+				await window.desktopApi.assignPolicyPack({
 					connectionId,
 					policyPackId:
 						selectedAssignedPolicyPackId === 'none'
@@ -414,7 +414,7 @@ export const GovernancePanel = ({
 	const updateRetentionPolicyMutation = useMutation({
 		mutationFn: async (dataset: RetentionPolicy['dataset']) =>
 			unwrapResponse(
-				await window.speichr.updateRetentionPolicy({
+				await window.desktopApi.updateRetentionPolicy({
 					policy: {
 						dataset,
 						retentionDays: Math.max(
@@ -444,7 +444,7 @@ export const GovernancePanel = ({
 	const purgePreviewMutation = useMutation({
 		mutationFn: async () =>
 			unwrapResponse(
-				await window.speichr.purgeRetentionData({
+				await window.desktopApi.purgeRetentionData({
 					dataset: purgeDataset,
 					olderThan: resolvePurgeOlderThanIso(),
 					dryRun: true,
@@ -478,7 +478,7 @@ export const GovernancePanel = ({
 			}
 
 			return unwrapResponse(
-				await window.speichr.purgeRetentionData({
+				await window.desktopApi.purgeRetentionData({
 					dataset: purgeDataset,
 					olderThan: resolvePurgeOlderThanIso(),
 					dryRun: false,
