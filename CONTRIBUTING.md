@@ -30,7 +30,8 @@ bun run test:all
 - Keep PRs focused and scoped.
 - Include tests for behavior changes.
 - Update `CHANGELOG.md` for user-visible changes.
+- For a release commit, update `package.json` `version` and add the matching `CHANGELOG.md` entry in the same change.
 
 ## Release Notes
 
-Releases are tag-driven (`v*.*.*`) and produced by GitHub Actions as draft releases with attached artifacts and checksums.
+Releases are produced automatically by GitHub Actions when the default branch contains a `package.json` version that does not yet have a GitHub Release and CI passes. The workflow tags the current green commit, uploads artifacts, and publishes checksums with the GitHub Release.
