@@ -11,7 +11,9 @@ import {
 } from 'lucide-react'
 import * as React from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import pkg from '../../../package.json'
 
+import { useStartupGateReady } from '@/renderer/app/startup-gate'
 import { Badge } from '@/renderer/components/ui/badge'
 import { Button } from '@/renderer/components/ui/button'
 import {
@@ -42,7 +44,6 @@ import {
 	SidebarSeparator,
 	SidebarTrigger,
 } from '@/renderer/components/ui/sidebar'
-import { useStartupGateReady } from '@/renderer/app/startup-gate'
 import { AlertsNavbarPopover } from '@/renderer/features/alerts/alerts-navbar-popover'
 import { unwrapResponse } from '@/renderer/features/common/ipc'
 import { useUiStore } from '@/renderer/state/ui-store'
@@ -235,7 +236,7 @@ export const AppShellLayout = () => {
 				<SidebarHeader>
 					<div className='bg-muted py-1 h-10 text-sm font-medium w-full flex items-center justify-between px-2'>
 						<LogoWordmark className='h-full' />
-						<span className='text-[10px] text-muted-foreground'>v1.2.1</span>
+						<span className='text-[10px] text-muted-foreground'>v{pkg.version}</span>
 					</div>
 				</SidebarHeader>
 
